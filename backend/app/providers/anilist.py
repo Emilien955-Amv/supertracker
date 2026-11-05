@@ -14,8 +14,10 @@ import httpx
 from app.providers.base import (
     ContentDetail,
     ContentKind,
+    EpisodeSummary,
     ProviderError,
     SearchResult,
+    SeasonSummary,
     Source,
 )
 
@@ -27,6 +29,15 @@ _CHAMPS_COMMUNS = """
   startDate { year month day }
   coverImage { large extraLarge }
   description(asHtml: false)
+"""
+
+EPISODES_QUERY = """
+query ($id: Int) {
+  Media(id: $id, type: ANIME) {
+    episodes
+    nextAiringEpisode { episode }
+  }
+}
 """
 
 SEARCH_QUERY = f"""
@@ -47,6 +58,7 @@ query ($id: Int) {{
     endDate {{ year month day }}
     genres
     episodes
+    nextAiringEpisode {{ episode }}
     duration
     status
     siteUrl
@@ -103,6 +115,18 @@ def _date(value: dict[str, Any] | None) -> date | None:
         return None
 
 
+def _aired_episodes(media: dict[str, Any]) -> int | None:
+    """Nombre d'épisodes déjà diffusés.
+
+    Pour un anime en cours (ex. One Piece), AniList ne donne pas de total
+    (« episodes » vaut null) mais indique le prochain épisode à paraître.
+    """
+    if media.get("episodes"):
+        return int(media["episodes"])
+    upcoming = (media.get("nextAiringEpisode") or {}).get("episode")
+    return int(upcoming) - 1 if upcoming and upcoming > 1 else None
+
+
 def _title(media: dict[str, Any]) -> tuple[str, str | None]:
     titles = media.get("title") or {}
     # Le titre anglais est souvent le plus connu en France ; sinon, le romaji.
@@ -157,6 +181,7 @@ class AniListProvider:
 
         base = self._result(media)
         cover = media.get("coverImage") or {}
+        aired = _aired_episodes(media)
         return ContentDetail(
             **base.model_dump(exclude={"poster_url"}),
             poster_url=cover.get("extraLarge") or cover.get("large"),
@@ -166,6 +191,25 @@ class AniListProvider:
             end_date=_date(media.get("endDate")),
             runtime_minutes=media.get("duration"),
             status=STATUTS.get(media.get("status", ""), media.get("status")),
-            episodes_count=media.get("episodes"),
+            episodes_count=aired,
+            # AniList n'a pas de saisons : une saison unique regroupe les épisodes.
+            seasons=[SeasonSummary(number=1, name="Épisodes", episode_count=aired)]
+            if aired
+            else [],
             source_url=media.get("siteUrl") or f"https://anilist.co/anime/{media['id']}",
+            is_finished=media.get("status") in ("FINISHED", "CANCELLED"),
         )
+
+    async def get_season(
+        self, http: httpx.AsyncClient, external_id: str, season_number: int
+    ) -> list[EpisodeSummary] | None:
+        if season_number != 1 or not external_id.isdigit():
+            return None
+        media = (await self._query(http, EPISODES_QUERY, {"id": int(external_id)})).get("Media")
+        if not media:
+            return None
+        # AniList ne fournit ni titre ni image par épisode : seulement les numéros.
+        return [
+            EpisodeSummary(season_number=1, number=number)
+            for number in range(1, (_aired_episodes(media) or 0) + 1)
+        ]

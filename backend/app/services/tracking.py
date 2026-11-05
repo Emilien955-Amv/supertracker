@@ -1,0 +1,218 @@
+"""Suivi d'un contenu : statut, note, avis, épisodes vus et progression."""
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from sqlalchemy import Subquery, delete, func, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Content, Episode, EpisodeView, Tracking, TrackingStatus
+from app.providers.base import ContentKind
+
+
+class EpisodeNotFoundError(Exception):
+    """Un des épisodes demandés n'appartient pas à ce contenu."""
+
+
+@dataclass
+class Progress:
+    watched: int
+    total: int | None  # None : nombre d'épisodes inconnu (anime en cours…)
+
+    @property
+    def percent(self) -> int | None:
+        if not self.total:
+            return None
+        return min(100, round(100 * self.watched / self.total))
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+async def get_tracking(session: AsyncSession, user_id: int, content_id: int) -> Tracking | None:
+    return await session.scalar(
+        select(Tracking).where(Tracking.user_id == user_id, Tracking.content_id == content_id)
+    )
+
+
+def _watched_counts(user_id: int) -> Subquery:
+    """Sous-requête : nombre d'épisodes vus par contenu, hors épisodes spéciaux."""
+    return (
+        select(Episode.content_id, func.count().label("watched"))
+        .join(EpisodeView, EpisodeView.episode_id == Episode.id)
+        .where(EpisodeView.user_id == user_id, Episode.season_number > 0)
+        .group_by(Episode.content_id)
+        .subquery()
+    )
+
+
+def compute_progress(content: Content, tracking: Tracking | None, watched: int) -> Progress:
+    if content.kind == ContentKind.MOVIE:
+        # Un film n'a pas d'épisodes : il est vu quand son suivi est « terminé ».
+        seen = tracking is not None and tracking.status == TrackingStatus.COMPLETED
+        return Progress(watched=int(seen), total=1)
+    return Progress(watched=watched, total=content.episodes_count)
+
+
+async def get_progress(
+    session: AsyncSession, user_id: int, content: Content, tracking: Tracking | None
+) -> Progress:
+    watched = await session.scalar(
+        select(func.count())
+        .select_from(EpisodeView)
+        .join(Episode, EpisodeView.episode_id == Episode.id)
+        .where(
+            EpisodeView.user_id == user_id,
+            Episode.content_id == content.id,
+            Episode.season_number > 0,
+        )
+    )
+    return compute_progress(content, tracking, watched or 0)
+
+
+def _apply_status(tracking: Tracking, status: TrackingStatus) -> None:
+    """Change le statut et tient à jour les dates de début et de fin."""
+    if status in (TrackingStatus.WATCHING, TrackingStatus.COMPLETED) and not tracking.started_at:
+        tracking.started_at = _now()
+    if status == TrackingStatus.COMPLETED and tracking.status != TrackingStatus.COMPLETED:
+        tracking.completed_at = _now()
+    tracking.status = status
+
+
+async def _get_or_create(
+    session: AsyncSession, user_id: int, content_id: int, status: TrackingStatus
+) -> Tracking:
+    # ON CONFLICT DO NOTHING : deux requêtes simultanées ne créent pas de doublon.
+    await session.execute(
+        insert(Tracking)
+        .values(user_id=user_id, content_id=content_id, status=TrackingStatus.PLANNED)
+        .on_conflict_do_nothing(index_elements=["user_id", "content_id"])
+    )
+    tracking = await get_tracking(session, user_id, content_id)
+    assert tracking is not None  # noqa: S101 (créé juste au-dessus)
+    if tracking.status == TrackingStatus.PLANNED and status != TrackingStatus.PLANNED:
+        _apply_status(tracking, status)
+    return tracking
+
+
+async def save_tracking(
+    session: AsyncSession,
+    user_id: int,
+    content: Content,
+    status: TrackingStatus,
+    rating: int | None,
+    review: str | None,
+) -> Tracking:
+    tracking = await _get_or_create(session, user_id, content.id, status)
+    _apply_status(tracking, status)
+    tracking.rating = rating
+    tracking.review = review
+    await session.commit()
+    await session.refresh(tracking)
+    return tracking
+
+
+async def delete_tracking(session: AsyncSession, user_id: int, content: Content) -> None:
+    """Retire le contenu du suivi ET oublie les épisodes cochés."""
+    await session.execute(
+        delete(Tracking).where(Tracking.user_id == user_id, Tracking.content_id == content.id)
+    )
+    await session.execute(
+        delete(EpisodeView).where(
+            EpisodeView.user_id == user_id,
+            EpisodeView.episode_id.in_(select(Episode.id).where(Episode.content_id == content.id)),
+        )
+    )
+    await session.commit()
+
+
+async def watched_episode_ids(
+    session: AsyncSession, user_id: int, episode_ids: list[int]
+) -> set[int]:
+    if not episode_ids:
+        return set()
+    rows = await session.scalars(
+        select(EpisodeView.episode_id).where(
+            EpisodeView.user_id == user_id, EpisodeView.episode_id.in_(episode_ids)
+        )
+    )
+    return set(rows)
+
+
+async def set_episodes_watched(
+    session: AsyncSession,
+    user_id: int,
+    content: Content,
+    episode_ids: list[int],
+    watched: bool,
+) -> Tracking | None:
+    """Coche ou décoche des épisodes, puis ajuste le statut automatiquement :
+    - premier épisode coché → « en cours » ;
+    - tous les épisodes d'une série terminée cochés → « terminé » ;
+    - un épisode décoché sur un contenu « terminé » → « en cours ».
+    """
+    unique_ids = set(episode_ids)
+    valid = set(
+        await session.scalars(
+            select(Episode.id).where(Episode.id.in_(unique_ids), Episode.content_id == content.id)
+        )
+    )
+    # Protection : impossible de cocher les épisodes d'un autre contenu.
+    if valid != unique_ids:
+        raise EpisodeNotFoundError
+
+    if watched:
+        await session.execute(
+            insert(EpisodeView)
+            .values([{"user_id": user_id, "episode_id": eid} for eid in sorted(valid)])
+            .on_conflict_do_nothing()
+        )
+    else:
+        await session.execute(
+            delete(EpisodeView).where(
+                EpisodeView.user_id == user_id, EpisodeView.episode_id.in_(valid)
+            )
+        )
+
+    tracking = await get_tracking(session, user_id, content.id)
+    if tracking is None and watched:
+        tracking = await _get_or_create(session, user_id, content.id, TrackingStatus.WATCHING)
+
+    if tracking is not None:
+        progress = await get_progress(session, user_id, content, tracking)
+        all_seen = progress.total is not None and progress.watched >= progress.total
+        if watched and content.is_finished and all_seen:
+            _apply_status(tracking, TrackingStatus.COMPLETED)
+        elif watched and tracking.status != TrackingStatus.COMPLETED:
+            _apply_status(tracking, TrackingStatus.WATCHING)
+        elif not watched and tracking.status == TrackingStatus.COMPLETED and not all_seen:
+            _apply_status(tracking, TrackingStatus.WATCHING)
+        # Remonte le contenu en haut de « Mon suivi » (tri par activité récente).
+        tracking.updated_at = _now()
+
+    await session.commit()
+    if tracking is not None:
+        await session.refresh(tracking)
+    return tracking
+
+
+async def list_trackings(
+    session: AsyncSession, user_id: int, status: TrackingStatus | None
+) -> list[tuple[Tracking, Content, Progress]]:
+    counts = _watched_counts(user_id)
+    query = (
+        select(Tracking, Content, func.coalesce(counts.c.watched, 0))
+        .join(Content, Content.id == Tracking.content_id)
+        .outerjoin(counts, counts.c.content_id == Content.id)
+        .where(Tracking.user_id == user_id)
+        .order_by(Tracking.updated_at.desc(), Tracking.id.desc())
+    )
+    if status is not None:
+        query = query.where(Tracking.status == status)
+    rows = await session.execute(query)
+    return [
+        (tracking, content, compute_progress(content, tracking, watched))
+        for tracking, content, watched in rows.tuples()
+    ]

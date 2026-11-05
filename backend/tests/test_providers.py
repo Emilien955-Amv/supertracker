@@ -249,3 +249,63 @@ async def test_tmdb_aucune_plateforme() -> None:
     assert fiche is not None and fiche.watch is not None
     assert fiche.watch.subscription == fiche.watch.rent == fiche.watch.buy == []
     assert fiche.watch.link is None
+
+
+# --- Épisodes d'une saison ----------------------------------------------------
+
+
+async def test_tmdb_episodes_d_une_saison() -> None:
+    saison = {
+        "episodes": [
+            {
+                "episode_number": 1,
+                "name": "L'hiver vient",
+                "air_date": "2011-04-17",
+                "runtime": 62,
+                "still_path": "/e1.jpg",
+            },
+            {"episode_number": 2, "name": "", "air_date": None, "still_path": None},
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/3/tv/1399/season/1"
+        return httpx.Response(200, json=saison)
+
+    async with faux_client(handler) as http:
+        episodes = await TmdbProvider("jeton").get_season(http, "1399", 1)
+
+    assert episodes is not None
+    assert [(e.number, e.title) for e in episodes] == [(1, "L'hiver vient"), (2, None)]
+    assert episodes[0].still_url == "https://image.tmdb.org/t/p/w300/e1.jpg"
+    assert episodes[0].air_date == date(2011, 4, 17)
+
+
+async def test_tmdb_saison_inexistante() -> None:
+    async with faux_client(lambda _: httpx.Response(404)) as http:
+        assert await TmdbProvider("jeton").get_season(http, "1399", 99) is None
+
+
+async def test_tmdb_serie_terminee() -> None:
+    async with faux_client(lambda _: httpx.Response(200, json=TMDB_SERIE)) as http:
+        fiche = await TmdbProvider("jeton").get_detail(http, ContentKind.SERIES, "1399")
+    assert fiche is not None
+    assert fiche.is_finished
+
+
+async def test_anilist_anime_en_cours_compte_les_episodes_diffuses() -> None:
+    # One Piece : pas de total, mais le prochain épisode à paraître est le 1150.
+    media = {**ANILIST_MEDIA, "nextAiringEpisode": {"episode": 1150}}
+    async with faux_client(lambda _: httpx.Response(200, json={"data": {"Media": media}})) as http:
+        fiche = await AniListProvider().get_detail(http, ContentKind.ANIME, "21")
+        episodes = await AniListProvider().get_season(http, "21", 1)
+        autre_saison = await AniListProvider().get_season(http, "21", 2)
+
+    assert fiche is not None
+    assert fiche.episodes_count == 1149
+    assert not fiche.is_finished
+    assert [(s.number, s.episode_count) for s in fiche.seasons] == [(1, 1149)]
+    assert episodes is not None
+    assert len(episodes) == 1149
+    assert (episodes[0].number, episodes[-1].number) == (1, 1149)
+    assert autre_saison is None  # AniList n'a qu'une « saison »

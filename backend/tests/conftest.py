@@ -1,15 +1,38 @@
 """Outils partagés par tous les tests (« fixtures » pytest)."""
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 
+import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.cache import redis_client
 from app.core.rate_limit import KEY_PREFIX
 from app.db import engine, get_session
+from app.http_client import get_http_client
 from app.main import app
+from app.models import User
+from app.providers.base import (
+    ContentDetail,
+    ContentKind,
+    EpisodeSummary,
+    ProviderError,
+    SearchResult,
+    Source,
+)
+from app.providers.registry import get_providers
+
+
+async def vider_cache_catalogue() -> None:
+    """Supprime les fiches mises en cache. Appelé avant ET après les tests qui
+    utilisent de fausses sources : sinon leurs fausses fiches resteraient dans
+    le Redis local et l'application les servirait ensuite comme de vraies."""
+    keys = [k async for k in redis_client.scan_iter("cache:*")]
+    if keys:
+        await redis_client.delete(*keys)
 
 
 @pytest.fixture
@@ -63,3 +86,95 @@ async def db_client(client: AsyncClient, db_session: AsyncSession) -> AsyncItera
         yield client
     finally:
         app.dependency_overrides.pop(get_session, None)
+
+
+# --- Suivi et bibliothèques ---------------------------------------------------
+
+
+class FausseSource:
+    """Source TMDB simulée : un film (Matrix) et une série terminée de 3 épisodes
+    (2 en saison 1, 1 en saison 2), plus un épisode spécial en saison 0."""
+
+    source = Source.TMDB
+
+    def __init__(self) -> None:
+        self.en_panne = False
+        self.appels = 0
+
+    async def search(self, http: httpx.AsyncClient, query: str) -> list[SearchResult]:
+        return []
+
+    async def get_detail(
+        self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
+    ) -> ContentDetail | None:
+        self.appels += 1
+        if self.en_panne:
+            raise ProviderError("source en panne")
+        if (kind, external_id) == (ContentKind.MOVIE, "603"):
+            return ContentDetail(
+                source=Source.TMDB,
+                kind=kind,
+                external_id="603",
+                title="Matrix",
+                year=1999,
+                source_url="https://exemple.fr/603",
+                is_finished=True,
+            )
+        if (kind, external_id) == (ContentKind.SERIES, "1399"):
+            return ContentDetail(
+                source=Source.TMDB,
+                kind=kind,
+                external_id="1399",
+                title="Game of Thrones",
+                episodes_count=3,
+                source_url="https://exemple.fr/1399",
+                is_finished=True,
+            )
+        return None
+
+    async def get_season(
+        self, http: httpx.AsyncClient, external_id: str, season_number: int
+    ) -> list[EpisodeSummary] | None:
+        if self.en_panne:
+            raise ProviderError("source en panne")
+        episodes = {0: 1, 1: 2, 2: 1}.get(season_number) if external_id == "1399" else None
+        if episodes is None:
+            return None
+        return [
+            EpisodeSummary(season_number=season_number, number=n, title=f"Épisode {n}")
+            for n in range(1, episodes + 1)
+        ]
+
+
+@dataclass
+class Contexte:
+    """Ce dont un test de suivi a besoin : la fausse source et deux comptes."""
+
+    source: FausseSource
+    alice: User
+    bob: User
+
+    def connecter(self, user: User) -> None:
+        app.dependency_overrides[get_current_user] = lambda: user
+
+
+@pytest.fixture
+async def contexte(db_client: AsyncClient, db_session: AsyncSession) -> AsyncIterator[Contexte]:
+    alice = User(email="alice@exemple.fr", username="alice_test", password_hash="x")
+    bob = User(email="bob@exemple.fr", username="bob_test", password_hash="x")
+    db_session.add_all([alice, bob])
+    await db_session.commit()
+
+    # Cache vidé : les fiches doivent venir de la fausse source, pas de Redis.
+    await vider_cache_catalogue()
+
+    ctx = Contexte(source=FausseSource(), alice=alice, bob=bob)
+    ctx.connecter(alice)
+    app.dependency_overrides[get_providers] = lambda: [ctx.source]
+    app.dependency_overrides[get_http_client] = lambda: None
+    try:
+        yield ctx
+    finally:
+        for dependency in (get_current_user, get_providers, get_http_client):
+            app.dependency_overrides.pop(dependency, None)
+        await vider_cache_catalogue()

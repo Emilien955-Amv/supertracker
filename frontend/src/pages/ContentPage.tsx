@@ -1,17 +1,27 @@
 import { useNavigate, useParams } from "react-router";
 
 import { Attribution } from "../components/Attribution";
+import { LibraryPicker } from "../components/LibraryPicker";
 import { Poster } from "../components/Poster";
+import { SeasonsTracker } from "../components/SeasonsTracker";
+import { TrackingPanel } from "../components/TrackingPanel";
 import { WatchProviders } from "../components/WatchProviders";
 import { ApiError } from "../lib/api";
 import { KIND_LABELS, SOURCE_LABELS, formatDate, formatRuntime } from "../lib/catalog";
-import type { ContentDetail } from "../lib/catalog";
-import { useApi } from "../lib/useApi";
+import type { ContentDetail, ContentKind, Source } from "../lib/catalog";
+import { trackingPath } from "../lib/tracking";
+import type { ContentState } from "../lib/tracking";
+import { useApi, useApiResource } from "../lib/useApi";
 
 export default function ContentPage() {
   const { source, kind, id } = useParams();
   const navigate = useNavigate();
   const state = useApi<ContentDetail>(`/api/catalog/${source}/${kind}/${id}`);
+  // Identité du contenu telle que l'API l'attend (sans le reste de la fiche).
+  const ref = { source: source as Source, kind: kind as ContentKind, external_id: id ?? "" };
+  const apiPath = trackingPath(ref);
+  // Où en est l'utilisateur : chargé en parallèle de la fiche.
+  const [tracking, setTracking] = useApiResource<ContentState>(apiPath);
 
   const back = (
     <button
@@ -91,6 +101,22 @@ export default function ContentPage() {
           </div>
         </div>
 
+        {tracking.status === "success" && (
+          <>
+            <TrackingPanel
+              path={apiPath}
+              state={tracking.data}
+              onChange={setTracking}
+              isMovie={content.kind === "movie"}
+            />
+            <LibraryPicker
+              content={ref}
+              contentId={tracking.data.content_id}
+              onContentId={(contentId) => setTracking({ ...tracking.data, content_id: contentId })}
+            />
+          </>
+        )}
+
         {content.genres.length > 0 && (
           <ul aria-label="Genres" className="mt-5 flex flex-wrap gap-2">
             {content.genres.map((genre) => (
@@ -125,34 +151,7 @@ export default function ContentPage() {
         {content.watch && <WatchProviders watch={content.watch} />}
 
         {content.seasons.length > 0 && (
-          <section aria-labelledby="saisons" className="mt-8">
-            <h2 id="saisons" className="text-lg font-semibold">
-              Saisons
-            </h2>
-            <ul className="mt-3 divide-y divide-border rounded-xl border border-border bg-surface">
-              {content.seasons.map((season) => (
-                <li key={season.number} className="flex items-center gap-3 p-3">
-                  <div className="w-12 shrink-0">
-                    <Poster url={season.poster_url} title={season.name} className="rounded-md text-[8px]" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="font-medium">{season.name}</p>
-                    <p className="text-sm text-muted">
-                      {[
-                        season.episode_count !== null && `${season.episode_count} épisodes`,
-                        season.air_date && new Date(season.air_date).getFullYear(),
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs text-muted">
-              Le suivi épisode par épisode arrive à la prochaine étape.
-            </p>
-          </section>
+          <SeasonsTracker path={apiPath} seasons={content.seasons} onStateChange={setTracking} />
         )}
 
         <a

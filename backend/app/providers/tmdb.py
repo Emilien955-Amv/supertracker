@@ -12,6 +12,7 @@ import httpx
 from app.providers.base import (
     ContentDetail,
     ContentKind,
+    EpisodeSummary,
     ProviderError,
     SearchResult,
     SeasonSummary,
@@ -110,6 +111,26 @@ class TmdbProvider:
             return self._series(data) if data else None
         return None
 
+    async def get_season(
+        self, http: httpx.AsyncClient, external_id: str, season_number: int
+    ) -> list[EpisodeSummary] | None:
+        data = await self._get(http, f"/tv/{external_id}/season/{season_number}")
+        if not data:
+            return None
+        return [
+            EpisodeSummary(
+                season_number=season_number,
+                number=episode["episode_number"],
+                title=episode.get("name") or None,
+                air_date=parse_date(episode.get("air_date")),
+                runtime_minutes=episode.get("runtime") or None,
+                # « w300 » : vignette suffisante pour la liste des épisodes.
+                still_url=_image(episode.get("still_path"), "w300"),
+            )
+            for episode in data.get("episodes", [])
+            if isinstance(episode.get("episode_number"), int)
+        ]
+
     def _watch(self, data: dict[str, Any]) -> WatchAvailability:
         """Plateformes disponibles dans le pays choisi.
 
@@ -162,6 +183,7 @@ class TmdbProvider:
             runtime_minutes=data.get("runtime") or None,
             status=STATUTS.get(data.get("status", ""), data.get("status")),
             source_url=f"https://www.themoviedb.org/movie/{data['id']}",
+            is_finished=data.get("status") == "Released",
             watch=self._watch(data),
         )
 
@@ -199,5 +221,6 @@ class TmdbProvider:
             # La « saison 0 » regroupe les épisodes spéciaux : on la place à la fin.
             seasons=sorted(seasons, key=lambda s: (s.number == 0, s.number)),
             source_url=f"https://www.themoviedb.org/tv/{data['id']}",
+            is_finished=data.get("status") in ("Ended", "Canceled"),
             watch=self._watch(data),
         )

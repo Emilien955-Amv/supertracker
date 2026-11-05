@@ -20,6 +20,7 @@ from app.providers.base import (
 )
 from app.providers.registry import get_providers
 from app.services.catalog import CACHE_PREFIX, normalize_query
+from tests.conftest import vider_cache_catalogue
 
 pytestmark = pytest.mark.integration
 
@@ -66,8 +67,8 @@ async def catalogue(client: AsyncClient) -> AsyncIterator[dict[str, FausseSource
         "tmdb": FausseSource(Source.TMDB, ["Film A", "Film B", "Film C"]),
         "anilist": FausseSource(Source.ANILIST, ["Anime A"]),
     }
-    keys = [k async for k in redis_client.scan_iter("cache:*")]
-    keys += [k async for k in redis_client.scan_iter("ratelimit:*")]
+    await vider_cache_catalogue()
+    keys = [k async for k in redis_client.scan_iter("ratelimit:*")]
     if keys:
         await redis_client.delete(*keys)
 
@@ -79,6 +80,7 @@ async def catalogue(client: AsyncClient) -> AsyncIterator[dict[str, FausseSource
     finally:
         for dependency in (get_current_user, get_providers, get_http_client):
             app.dependency_overrides.pop(dependency, None)
+        await vider_cache_catalogue()
 
 
 async def test_recherche_fusionne_en_alternance(

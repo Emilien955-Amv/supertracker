@@ -31,7 +31,7 @@ _results_adapter = TypeAdapter(list[SearchResult])
 _detail_adapter = TypeAdapter(ContentDetail | None)
 
 
-async def _cached[T](
+async def cached[T](
     key: str, ttl: int, adapter: TypeAdapter[T], fetch: Callable[[], Awaitable[T]]
 ) -> T:
     """Renvoie la valeur en cache si elle existe ; sinon la calcule et la range.
@@ -76,7 +76,7 @@ async def search_all(
     # temps de la source la plus lente, pas la somme de toutes.
     outcomes = await asyncio.gather(
         *(
-            _cached(f"search:{p.source}:{normalized}", ttl, _results_adapter, fetcher(p))
+            cached(f"search:{p.source}:{normalized}", ttl, _results_adapter, fetcher(p))
             for p in providers
         ),
         return_exceptions=True,  # une source en panne ne fait pas tout échouer
@@ -108,7 +108,7 @@ async def get_detail(
     if provider is None:
         return None
 
-    detail = await _cached(
+    detail = await cached(
         f"detail:{source}:{kind}:{external_id}",
         get_settings().detail_cache_seconds,
         _detail_adapter,

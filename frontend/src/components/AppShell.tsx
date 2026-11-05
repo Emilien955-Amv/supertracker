@@ -3,6 +3,8 @@ import { NavLink, Outlet } from "react-router";
 const NAV_ITEMS = [
   { to: "/", label: "Accueil", icon: "M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" },
   { to: "/recherche", label: "Recherche", icon: "M10.5 4a6.5 6.5 0 1 0 4.03 11.6l4.43 4.43 1.41-1.41-4.43-4.43A6.5 6.5 0 0 0 10.5 4m0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9" },
+  { to: "/suivi", label: "Suivi", icon: "M14 10H3v2h11zm0-4H3v2h11zM3 16h7v-2H3zm18.5-4.5L23 13l-6.99 7-4.51-4.5L13 14l3.01 3z" },
+  { to: "/bibliotheques", label: "Bibliothèques", icon: "M4 6H2v14a2 2 0 0 0 2 2h14v-2H4zm16-4H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2m0 10-2.5-1.5L15 12V4h5z" },
 ];
 
 /** Cadre des pages connectées : contenu + barre de navigation en bas
@@ -15,14 +17,14 @@ export function AppShell() {
         aria-label="Navigation principale"
         className="fixed inset-x-0 bottom-0 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
       >
-        <ul className="mx-auto flex max-w-md justify-around">
+        <ul className="mx-auto flex max-w-md">
           {NAV_ITEMS.map((item) => (
-            <li key={item.to}>
+            <li key={item.to} className="flex-1">
               <NavLink
                 to={item.to}
                 end={item.to === "/"}
                 className={({ isActive }) =>
-                  `flex flex-col items-center gap-1 px-6 py-2.5 text-xs font-medium ${
+                  `flex flex-col items-center gap-1 px-1 py-2.5 text-xs font-medium ${
                     isActive ? "text-accent" : "text-muted hover:text-text"
                   }`
                 }

@@ -23,3 +23,6 @@ dev-dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Cache de compilation TypeScript
+*.tsbuildinfo

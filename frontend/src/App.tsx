@@ -5,9 +5,12 @@ import { GuestOnly, RequireAuth } from "./auth/guards";
 import { AppShell } from "./components/AppShell";
 import ContentPage from "./pages/ContentPage";
 import HomePage from "./pages/HomePage";
+import LibrariesPage from "./pages/LibrariesPage";
+import LibraryPage from "./pages/LibraryPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import SearchPage from "./pages/SearchPage";
+import TrackingListPage from "./pages/TrackingListPage";
 
 /** Table des routes : quelle page afficher pour quelle adresse. */
 export function AppRoutes() {
@@ -26,6 +29,9 @@ export function AppRoutes() {
         <Route path="/" element={<HomePage />} />
         <Route path="/recherche" element={<SearchPage />} />
         <Route path="/contenu/:source/:kind/:id" element={<ContentPage />} />
+        <Route path="/suivi" element={<TrackingListPage />} />
+        <Route path="/bibliotheques" element={<LibrariesPage />} />
+        <Route path="/bibliotheques/:id" element={<LibraryPage />} />
       </Route>
 
       <Route

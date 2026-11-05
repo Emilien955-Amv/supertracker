@@ -43,6 +43,15 @@ class SeasonSummary(BaseModel):
     poster_url: str | None = None
 
 
+class EpisodeSummary(BaseModel):
+    season_number: int
+    number: int
+    title: str | None = None
+    air_date: date | None = None
+    runtime_minutes: int | None = None
+    still_url: str | None = Field(default=None, description="Image tirée de l'épisode")
+
+
 class WatchProvider(BaseModel):
     name: str
     logo_url: str | None = None
@@ -70,6 +79,9 @@ class ContentDetail(SearchResult):
     episodes_count: int | None = None
     seasons: list[SeasonSummary] = []
     source_url: str = Field(description="Page du contenu sur le site de la source")
+    # Plus aucun épisode ne sortira (série terminée ou annulée, film sorti) :
+    # permet de passer automatiquement le suivi à « terminé ».
+    is_finished: bool = False
     # None : la source ne fournit pas cette information (ex. AniList).
     watch: WatchAvailability | None = None
 
@@ -88,6 +100,12 @@ class MetadataProvider(Protocol):
     async def get_detail(
         self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
     ) -> ContentDetail | None: ...
+
+    async def get_season(
+        self, http: httpx.AsyncClient, external_id: str, season_number: int
+    ) -> list[EpisodeSummary] | None:
+        """Épisodes d'une saison ; None si la saison n'existe pas."""
+        ...
 
 
 def parse_date(value: str | None) -> date | None:

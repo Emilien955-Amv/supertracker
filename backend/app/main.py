@@ -11,7 +11,7 @@ import structlog
 from fastapi import FastAPI
 
 from app import __version__
-from app.api import auth, catalog, health, users
+from app.api import auth, catalog, health, libraries, tracking, users
 from app.cache import redis_client
 from app.config import get_settings
 from app.db import engine
@@ -41,7 +41,14 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
-    for router in (health.router, auth.router, users.router, catalog.router):
+    for router in (
+        health.router,
+        auth.router,
+        users.router,
+        catalog.router,
+        tracking.router,
+        libraries.router,
+    ):
         app.include_router(router, prefix="/api")
     return app
 

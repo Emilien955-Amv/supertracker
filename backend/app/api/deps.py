@@ -2,19 +2,29 @@
 
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+import httpx
+from fastapi import Depends, HTTPException, Path, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_access_token
 from app.db import get_session
+from app.http_client import get_http_client
 from app.models import User
+from app.providers.base import MetadataProvider
+from app.providers.registry import get_providers
 
 # auto_error=False : on renvoie nous-mêmes un message d'erreur en français.
 # Ce schéma ajoute aussi le bouton « Authorize » dans la documentation /api/docs.
 _bearer = HTTPBearer(auto_error=False, description="Jeton obtenu via /api/auth/login")
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+HttpDep = Annotated[httpx.AsyncClient, Depends(get_http_client)]
+ProvidersDep = Annotated[list[MetadataProvider], Depends(get_providers)]
+
+# Identifiant chez la source : uniquement des chiffres, ce qui rend impossible
+# l'injection d'un chemin ou de paramètres dans l'adresse envoyée à la source.
+ExternalId = Annotated[str, Path(pattern=r"^\d{1,12}$")]
 
 
 async def get_current_user(

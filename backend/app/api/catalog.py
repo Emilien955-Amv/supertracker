@@ -2,28 +2,21 @@
 
 from typing import Annotated
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
-from app.api.deps import CurrentUser
+from app.api.deps import CurrentUser, ExternalId, HttpDep, ProvidersDep
 from app.core.rate_limit import enforce_rate_limit
-from app.http_client import get_http_client
 from app.providers.base import (
     ContentDetail,
     ContentKind,
-    MetadataProvider,
     ProviderError,
     SearchResult,
     Source,
 )
-from app.providers.registry import get_providers
 from app.services import catalog
 
 router = APIRouter(prefix="/catalog", tags=["Catalogue"])
-
-HttpDep = Annotated[httpx.AsyncClient, Depends(get_http_client)]
-ProvidersDep = Annotated[list[MetadataProvider], Depends(get_providers)]
 
 
 class SearchResponse(BaseModel):
@@ -59,9 +52,7 @@ async def detail(
     providers: ProvidersDep,
     source: Source,
     kind: ContentKind,
-    # Uniquement des chiffres : impossible d'injecter un chemin ou des
-    # paramètres dans l'adresse envoyée à la source.
-    external_id: Annotated[str, Path(pattern=r"^\d{1,12}$")],
+    external_id: ExternalId,
 ) -> ContentDetail:
     await enforce_rate_limit(f"detail:{user.id}", limit=120, window_seconds=60)
     try:

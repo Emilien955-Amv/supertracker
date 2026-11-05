@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, apiFetch } from "./api";
 
@@ -16,7 +16,18 @@ export type ApiState<T> =
  *   une réponse lente ne peut jamais écraser une réponse plus récente.
  */
 export function useApi<T>(path: string | null): ApiState<T> {
+  return useApiResource<T>(path)[0];
+}
+
+/**
+ * Comme useApi, mais renvoie aussi « setData » pour remplacer la donnée
+ * affichée (ex. par la réponse d'une modification), sans recharger.
+ */
+export function useApiResource<T>(
+  path: string | null,
+): [ApiState<T>, (data: T) => void] {
   const [state, setState] = useState<ApiState<T>>({ status: "idle" });
+  const setData = useCallback((data: T) => setState({ status: "success", data }), []);
 
   useEffect(() => {
     if (path === null) {
@@ -37,7 +48,7 @@ export function useApi<T>(path: string | null): ApiState<T> {
     return () => controller.abort();
   }, [path]);
 
-  return state;
+  return [state, setData];
 }
 
 /** Renvoie la valeur seulement après « delay » ms sans changement : on évite

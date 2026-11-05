@@ -2,6 +2,41 @@ import { Link } from "react-router";
 
 import { useAuth } from "../auth/AuthContext";
 import { HealthCard } from "../components/HealthCard";
+import { Poster } from "../components/Poster";
+import { ProgressBar } from "../components/ProgressBar";
+import { contentPath } from "../lib/catalog";
+import type { TrackedItem } from "../lib/tracking";
+import { useApi } from "../lib/useApi";
+
+/** « Continuer à regarder » : les contenus en cours, du plus récent au plus ancien. */
+function ContinueWatching() {
+  const state = useApi<TrackedItem[]>("/api/tracking?status=watching");
+  // Rien à afficher (ou erreur) : la section disparaît simplement.
+  if (state.status !== "success" || state.data.length === 0) return null;
+  return (
+    <section aria-labelledby="continuer">
+      <div className="flex items-baseline justify-between">
+        <h2 id="continuer" className="text-lg font-semibold">
+          Continuer à regarder
+        </h2>
+        <Link to="/suivi?statut=watching" className="text-sm text-accent hover:underline">
+          Tout voir
+        </Link>
+      </div>
+      <ul className="-mx-5 mt-3 flex gap-3 overflow-x-auto px-5 pb-2">
+        {state.data.slice(0, 10).map(({ content, progress }) => (
+          <li key={content.id} className="w-28 shrink-0">
+            <Link to={contentPath(content)} className="block">
+              <Poster url={content.poster_url} title={content.title} />
+              <p className="mt-1 truncate text-sm">{content.title}</p>
+              <ProgressBar percent={progress.percent ?? 0} label={`Progression de ${content.title}`} />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
 
 /** Accueil provisoire : il accueillera « prochains épisodes » et « sorties de
  * la semaine » dans les étapes suivantes. */
@@ -38,6 +73,8 @@ export default function HomePage() {
           →
         </span>
       </Link>
+
+      <ContinueWatching />
 
       <HealthCard />
 

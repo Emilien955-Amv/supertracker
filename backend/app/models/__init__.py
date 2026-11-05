@@ -5,7 +5,23 @@ Alembic de le « voir » pour générer automatiquement les migrations.
 """
 
 from app.db import Base
+from app.models.content import Content, Episode
+from app.models.library import Library, LibraryItem, SortMode, ViewMode
 from app.models.refresh_token import RefreshToken
+from app.models.tracking import EpisodeView, Tracking, TrackingStatus
 from app.models.user import User
 
-__all__ = ["Base", "RefreshToken", "User"]
+__all__ = [
+    "Base",
+    "Content",
+    "Episode",
+    "EpisodeView",
+    "Library",
+    "LibraryItem",
+    "RefreshToken",
+    "SortMode",
+    "Tracking",
+    "TrackingStatus",
+    "User",
+    "ViewMode",
+]
