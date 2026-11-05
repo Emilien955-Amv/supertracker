@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { AuthProvider } from "./auth/AuthContext";
 import { GuestOnly, RequireAuth } from "./auth/guards";
 import { AppShell } from "./components/AppShell";
+import CardsPage from "./pages/CardsPage";
 import ContentPage from "./pages/ContentPage";
 import HomePage from "./pages/HomePage";
 import LibrariesPage from "./pages/LibrariesPage";
@@ -34,6 +35,7 @@ export function AppRoutes() {
         <Route path="/bibliotheques" element={<LibrariesPage />} />
         <Route path="/bibliotheques/:id" element={<LibraryPage />} />
         <Route path="/profil" element={<ProfilePage />} />
+        <Route path="/cartes" element={<CardsPage />} />
       </Route>
 
       <Route

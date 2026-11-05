@@ -15,8 +15,10 @@ from app.core.rate_limit import KEY_PREFIX
 from app.db import engine, get_session
 from app.http_client import get_http_client
 from app.main import app
-from app.models import Content, User
+from app.models import Card, Content, User
 from app.providers.base import (
+    CharacterRole,
+    CharacterSummary,
     ContentDetail,
     ContentKind,
     EpisodeSummary,
@@ -146,6 +148,41 @@ class FausseSource:
             for n in range(1, episodes + 1)
         ]
 
+    async def get_popular(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
+        """Un seul contenu populaire (un film), pour tester le catalogue."""
+        if kind != ContentKind.MOVIE:
+            return []
+        return [
+            ContentDetail(
+                source=Source.TMDB,
+                kind=ContentKind.MOVIE,
+                external_id="680",
+                title="Pulp Fiction",
+                poster_url="https://img/680.jpg",
+                source_url="https://exemple.fr/680",
+            )
+        ]
+
+    async def get_characters(
+        self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
+    ) -> list[CharacterSummary]:
+        """Un héros, un rôle principal, un second rôle et un figurant."""
+        roles = [
+            ("Neo", CharacterRole.HERO),
+            ("Morpheus", CharacterRole.MAIN),
+            ("Oracle", CharacterRole.SUPPORTING),
+            ("Figurant", CharacterRole.BACKGROUND),
+        ]
+        return [
+            CharacterSummary(
+                name=f"{name} ({external_id})",
+                image_url=f"https://img/{external_id}/{order}.jpg",
+                role=role,
+                order=order,
+            )
+            for order, (name, role) in enumerate(roles)
+        ]
+
 
 @dataclass
 class Contexte:
@@ -154,6 +191,7 @@ class Contexte:
     source: FausseSource
     alice: User
     bob: User
+    session: AsyncSession
 
     def connecter(self, user: User) -> None:
         app.dependency_overrides[get_current_user] = lambda: user
@@ -168,14 +206,19 @@ async def contexte(db_client: AsyncClient, db_session: AsyncSession) -> AsyncIte
     # locale (essais à la main) : on les retire DANS la transaction du test,
     # annulée à la fin. Les vraies données ne sont donc jamais touchées.
     await db_session.execute(
-        delete(Content).where(Content.source == "tmdb", Content.external_id.in_(["603", "1399"]))
+        delete(Content).where(
+            Content.source == "tmdb", Content.external_id.in_(["603", "1399", "680"])
+        )
     )
+    # Le catalogue de cartes local (contenus populaires) est vidé lui aussi,
+    # le temps du test : les tirages ne dépendent que des données du test.
+    await db_session.execute(delete(Card))
     await db_session.commit()
 
     # Cache vidé : les fiches doivent venir de la fausse source, pas de Redis.
     await vider_cache_catalogue()
 
-    ctx = Contexte(source=FausseSource(), alice=alice, bob=bob)
+    ctx = Contexte(source=FausseSource(), alice=alice, bob=bob, session=db_session)
     ctx.connecter(alice)
     app.dependency_overrides[get_providers] = lambda: [ctx.source]
     app.dependency_overrides[get_http_client] = lambda: None

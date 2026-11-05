@@ -19,6 +19,8 @@ export type Rewards = {
   badges: BadgeBrief[];
   level_up: number | null;
   streak_days: number;
+  /** Boosters de cartes gagnés. */
+  boosters: number;
 };
 
 export type BadgeRead = BadgeBrief & {

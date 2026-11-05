@@ -4,11 +4,13 @@ Application web et mobile (PWA) de suivi de séries, animes, films, livres et
 jeux vidéo, avec bibliothèques personnalisées, gamification et cartes à
 collectionner.
 
-> **État actuel : étape 2a.** Comptes utilisateurs sécurisés, recherche unifiée de films,
+> **État actuel : étape 2b.** Comptes utilisateurs sécurisés, recherche unifiée de films,
 > séries et animes (TMDB, AniList) avec fiche détaillée, « où regarder » (logos cliquables) et cache Redis ;
 > suivi (statut, note, avis), épisodes cochés un par un avec progression, et
 > bibliothèques personnelles colorées (grille, étagère ou liste ; tri au choix) ;
-> points d'expérience, niveaux, bonus (série de jours, Jour J, marathon) et succès.
+> points d'expérience, niveaux, bonus (série de jours, Jour J, marathon) et succès ;
+> cartes à collectionner (7 raretés, de Commune à Divine) en boosters par thème
+> (animes, films, séries), catalogue de contenus populaires mis à jour chaque jour.
 
 ---
 
@@ -76,6 +78,7 @@ docker compose exec web npm run lint
 | Créer une migration après avoir modifié un modèle | `docker compose exec api alembic revision --autogenerate -m "description"` |
 | Appliquer les migrations | `docker compose exec api alembic upgrade head` |
 | Ouvrir la base en ligne de commande | `docker compose exec db psql -U supertracker` |
+| Remplir le catalogue de cartes à la main | `docker compose exec api python -m app.services.card_catalog` |
 | Reformater le code Python | `docker compose exec api ruff format .` |
 | Ajouter une dépendance npm | `docker compose exec web npm install <paquet>` |
 

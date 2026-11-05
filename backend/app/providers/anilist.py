@@ -12,6 +12,8 @@ from typing import Any
 import httpx
 
 from app.providers.base import (
+    CharacterRole,
+    CharacterSummary,
     ContentDetail,
     ContentKind,
     EpisodeSummary,
@@ -38,6 +40,39 @@ query ($id: Int) {
     nextAiringEpisode { episode }
   }
 }
+"""
+
+CHARACTERS_QUERY = """
+query ($id: Int) {
+  Media(id: $id, type: ANIME) {
+    characters(sort: [ROLE, RELEVANCE, ID], perPage: 25) {
+      edges {
+        role
+        node { name { full } image { large } }
+      }
+    }
+  }
+}
+"""
+
+# Rôles AniList → importance de la carte (le premier rôle principal devient le héros).
+ANILIST_ROLES = {
+    "MAIN": CharacterRole.MAIN,
+    "SUPPORTING": CharacterRole.SUPPORTING,
+    "BACKGROUND": CharacterRole.BACKGROUND,
+}
+MAX_CHARACTERS = 15
+
+POPULAR_QUERY = f"""
+query {{
+  Page(perPage: 40) {{
+    media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {{
+      {_CHAMPS_COMMUNS}
+      bannerImage
+      siteUrl
+    }}
+  }}
+}}
 """
 
 SEARCH_QUERY = f"""
@@ -213,3 +248,52 @@ class AniListProvider:
             EpisodeSummary(season_number=1, number=number)
             for number in range(1, (_aired_episodes(media) or 0) + 1)
         ]
+
+    async def get_characters(
+        self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
+    ) -> list[CharacterSummary]:
+        if kind != ContentKind.ANIME or not external_id.isdigit():
+            return []
+        data = await self._query(http, CHARACTERS_QUERY, {"id": int(external_id)})
+        edges = (((data.get("Media") or {}).get("characters")) or {}).get("edges") or []
+        characters: list[CharacterSummary] = []
+        hero_given = False
+        for edge in edges:
+            node = edge.get("node") or {}
+            name = ((node.get("name") or {}).get("full") or "").strip()
+            image = (node.get("image") or {}).get("large")
+            # Image par défaut d'AniList (silhouette grise) : considérée comme absente.
+            if not name or not image or "default.jpg" in image:
+                continue
+            role = ANILIST_ROLES.get(edge.get("role", ""), CharacterRole.BACKGROUND)
+            if role == CharacterRole.MAIN and not hero_given:
+                role, hero_given = CharacterRole.HERO, True
+            characters.append(
+                CharacterSummary(
+                    name=name[:200],
+                    image_url=image,
+                    role=role,
+                    order=len(characters),
+                )
+            )
+            if len(characters) >= MAX_CHARACTERS:
+                break
+        return characters
+
+    async def get_popular(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
+        if kind != ContentKind.ANIME:
+            return []
+        data = await self._query(http, POPULAR_QUERY, {})
+        items = []
+        for media in (data.get("Page") or {}).get("media", []):
+            base = self._result(media)
+            cover = media.get("coverImage") or {}
+            items.append(
+                ContentDetail(
+                    **base.model_dump(exclude={"poster_url"}),
+                    poster_url=cover.get("extraLarge") or cover.get("large"),
+                    backdrop_url=media.get("bannerImage"),
+                    source_url=media.get("siteUrl") or f"https://anilist.co/anime/{media['id']}",
+                )
+            )
+        return items

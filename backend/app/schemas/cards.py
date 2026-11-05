@@ -1,0 +1,97 @@
+"""Formats d'échange des cartes."""
+
+from pydantic import BaseModel
+
+from app.models import Card, CardKind, Content, Rarity
+from app.providers.base import ContentKind, Source
+from app.services.cards import PackTheme
+
+
+class CardContent(BaseModel):
+    id: int
+    source: Source
+    kind: ContentKind
+    external_id: str
+    title: str
+
+
+class CardRead(BaseModel):
+    id: int
+    rarity: Rarity
+    kind: CardKind
+    title: str
+    subtitle: str | None
+    image_url: str
+    content: CardContent
+
+    @classmethod
+    def of(cls, card: Card, content: Content) -> "CardRead":
+        return cls(
+            id=card.id,
+            rarity=Rarity(card.rarity),
+            kind=CardKind(card.kind),
+            title=card.title,
+            subtitle=card.subtitle,
+            image_url=card.image_url,
+            content=CardContent(
+                id=content.id,
+                source=Source(content.source),
+                kind=ContentKind(content.kind),
+                external_id=content.external_id,
+                title=content.title,
+            ),
+        )
+
+
+class CollectionCard(CardRead):
+    owned: bool
+    # Coût en fragments (None : impossible à fabriquer, ex. Divine).
+    craft_cost: int | None
+
+
+class RarityStat(BaseModel):
+    rarity: Rarity
+    owned: int
+    total: int
+    chance_percent: float  # probabilité par carte tirée
+
+
+class ThemeRead(BaseModel):
+    theme: PackTheme
+    label: str
+    cards: int  # cartes existantes dans ce thème
+
+
+class CollectionRead(BaseModel):
+    boosters: int  # boosters à ouvrir
+    fragments: int
+    boosters_until_pity: int  # boosters restants avant une Épique garantie
+    # Secondes avant le prochain booster gratuit (None : réserve pleine).
+    next_free_booster_in: int | None
+    free_booster_minutes: int
+    free_booster_max_stock: int
+    themes: list[ThemeRead]
+    stats: list[RarityStat]
+    cards: list[CollectionCard]
+
+
+class OpenRequest(BaseModel):
+    theme: PackTheme = PackTheme.MIXED
+
+
+class DrawnCardRead(BaseModel):
+    card: CardRead
+    is_new: bool
+    fragments: int  # fragments obtenus si c'est un doublon
+
+
+class BoosterOpened(BaseModel):
+    theme: PackTheme
+    cards: list[DrawnCardRead]
+    fragments: int
+    boosters_left: int
+
+
+class CraftResult(BaseModel):
+    card: CardRead
+    fragments: int

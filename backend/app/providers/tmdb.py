@@ -10,6 +10,8 @@ from typing import Any
 import httpx
 
 from app.providers.base import (
+    CharacterRole,
+    CharacterSummary,
     ContentDetail,
     ContentKind,
     EpisodeSummary,
@@ -50,6 +52,26 @@ def _image(path: str | None, size: str) -> str | None:
 def _year(value: str | None) -> int | None:
     parsed = parse_date(value)
     return parsed.year if parsed else None
+
+
+# Contenus populaires : 2 pages de 20 par type, renouvelées chaque jour.
+POPULAR_PAGES = 2
+ANIMATION_GENRE = 16  # identifiant du genre « Animation » chez TMDB
+
+# On garde les 15 personnages les plus importants : au-delà, ce sont des
+# apparitions qui rempliraient la collection de cartes sans intérêt.
+MAX_CHARACTERS = 15
+
+
+def _role_from_order(order: int) -> CharacterRole:
+    """TMDB classe le casting par importance (« order ») : 0 = premier rôle."""
+    if order == 0:
+        return CharacterRole.HERO
+    if order <= 3:
+        return CharacterRole.MAIN
+    if order <= 9:
+        return CharacterRole.SUPPORTING
+    return CharacterRole.BACKGROUND
 
 
 class TmdbProvider:
@@ -131,6 +153,73 @@ class TmdbProvider:
             for episode in data.get("episodes", [])
             if isinstance(episode.get("episode_number"), int)
         ]
+
+    async def get_characters(
+        self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
+    ) -> list[CharacterSummary]:
+        # Pour une série, « aggregate_credits » regroupe toutes les saisons.
+        if kind == ContentKind.MOVIE:
+            data = await self._get(http, f"/movie/{external_id}/credits")
+        elif kind == ContentKind.SERIES:
+            data = await self._get(http, f"/tv/{external_id}/aggregate_credits")
+        else:
+            return []
+        characters: list[CharacterSummary] = []
+        for item in sorted(data.get("cast", []), key=lambda c: c.get("order", 999)):
+            roles = item.get("roles") or [{}]
+            name = (item.get("character") or roles[0].get("character") or "").strip()
+            photo = item.get("profile_path")
+            # Données manquantes (pas de nom de personnage ou pas de photo) :
+            # pas de carte, plutôt qu'une carte vide.
+            if not name or not photo:
+                continue
+            order = len(characters)
+            characters.append(
+                CharacterSummary(
+                    name=name[:200],
+                    # « h632 » : photo haute, au format d'une carte.
+                    image_url=f"{IMAGE_URL}/h632{photo}",
+                    role=_role_from_order(order),
+                    order=order,
+                )
+            )
+            if len(characters) >= MAX_CHARACTERS:
+                break
+        return characters
+
+    async def get_popular(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
+        if kind not in (ContentKind.MOVIE, ContentKind.SERIES):
+            return []
+        is_movie = kind == ContentKind.MOVIE
+        path = "/movie/popular" if is_movie else "/tv/popular"
+        items: list[ContentDetail] = []
+        for page in range(1, POPULAR_PAGES + 1):
+            data = await self._get(http, path, page=str(page), region=self._region)
+            for item in data.get("results", []):
+                # Les animes japonais viennent d'AniList (pack « Animes ») :
+                # on les retire des séries TMDB pour éviter les doublons.
+                if (
+                    not is_movie
+                    and ANIMATION_GENRE in item.get("genre_ids", [])
+                    and (item.get("original_language") == "ja")
+                ):
+                    continue
+                title = item.get("title" if is_movie else "name") or "Sans titre"
+                items.append(
+                    ContentDetail(
+                        source=Source.TMDB,
+                        kind=kind,
+                        external_id=str(item["id"]),
+                        title=title,
+                        original_title=item.get("original_title" if is_movie else "original_name"),
+                        year=_year(item.get("release_date" if is_movie else "first_air_date")),
+                        poster_url=_image(item.get("poster_path"), "w500"),
+                        backdrop_url=_image(item.get("backdrop_path"), "w1280"),
+                        overview=item.get("overview") or None,
+                        source_url=f"https://www.themoviedb.org/{path.split('/')[1]}/{item['id']}",
+                    )
+                )
+        return items
 
     def _watch(self, data: dict[str, Any], title: str) -> WatchAvailability:
         """Plateformes disponibles dans le pays choisi.

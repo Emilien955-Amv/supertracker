@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import { onRewards } from "../lib/gamification";
 import type { Rewards } from "../lib/gamification";
@@ -52,6 +53,12 @@ export function RewardToaster() {
               </li>
             ))}
           </ul>
+          {toast.boosters > 0 && (
+            <Link to="/cartes" className="mt-2 block rounded-lg bg-accent/15 px-2 py-1 text-sm hover:bg-accent/25">
+              🎁 {toast.boosters} booster{toast.boosters > 1 ? "s" : ""} de cartes gagné
+              {toast.boosters > 1 ? "s" : ""} ! <span className="text-accent">Ouvrir →</span>
+            </Link>
+          )}
           {toast.badges.map((badge) => (
             <p key={badge.code} className="mt-2 rounded-lg bg-gold/10 px-2 py-1 text-sm">
               <span aria-hidden="true">{badge.icon}</span> Succès débloqué : <strong>{badge.name}</strong>

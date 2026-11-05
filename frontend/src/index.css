@@ -29,3 +29,51 @@ body {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* --- Cartes à collectionner -------------------------------------------------- */
+
+/* Mythique : lueur rouge qui « respire ». */
+@keyframes card-glow {
+  50% {
+    box-shadow: 0 0 22px 4px rgb(239 68 68 / 0.65);
+  }
+}
+.card-mythic {
+  animation: card-glow 2.5s ease-in-out infinite;
+}
+
+/* Divine : reflet holographique arc-en-ciel qui balaie la carte. */
+@keyframes card-holo {
+  to {
+    background-position: 200% 50%;
+  }
+}
+.card-divine {
+  box-shadow: 0 0 26px 6px rgb(255 243 196 / 0.55);
+}
+.card-divine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 20%,
+    rgb(255 0 170 / 0.35),
+    rgb(0 255 255 / 0.35),
+    rgb(255 255 0 / 0.35),
+    transparent 80%
+  );
+  background-size: 200% 100%;
+  mix-blend-mode: color-dodge;
+  animation: card-holo 3s linear infinite;
+}
+
+/* Accessibilité : pas d'animation pour qui les a désactivées. */
+@media (prefers-reduced-motion: reduce) {
+  .card-mythic,
+  .card-divine::after {
+    animation: none;
+  }
+}

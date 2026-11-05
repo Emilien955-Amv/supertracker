@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from app.providers.anilist import AniListProvider
-from app.providers.base import ContentKind, ProviderError, Source
+from app.providers.base import CharacterRole, ContentKind, ProviderError, Source
 from app.providers.tmdb import TmdbProvider
 from app.providers.watch_links import search_url
 
@@ -323,3 +323,67 @@ def test_lien_de_recherche_encode_le_titre() -> None:
         "https://tv.apple.com/fr/search?term=Am%C3%A9lie%20%26%20co"
     )
     assert search_url("Disney Plus", "Matrix") is None  # pas de lien vérifié : page des offres
+
+
+# --- Personnages (cartes) -----------------------------------------------------
+
+
+async def test_tmdb_personnages_classes_par_importance() -> None:
+    casting = {
+        "cast": [
+            {"order": 1, "character": "Morpheus", "name": "L. Fishburne", "profile_path": "/m.jpg"},
+            {"order": 0, "character": "Neo", "name": "K. Reeves", "profile_path": "/n.jpg"},
+            {"order": 2, "character": "Sans photo", "name": "X", "profile_path": None},
+            {"order": 3, "character": "", "name": "Sans rôle", "profile_path": "/x.jpg"},
+        ]
+        + [
+            {"order": 10 + i, "character": f"Rôle {i}", "name": "Y", "profile_path": f"/{i}.jpg"}
+            for i in range(20)
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/3/movie/603/credits"
+        return httpx.Response(200, json=casting)
+
+    async with faux_client(handler) as http:
+        persos = await TmdbProvider("jeton").get_characters(http, ContentKind.MOVIE, "603")
+
+    assert len(persos) == 15  # les 15 plus importants seulement
+    assert (persos[0].name, persos[0].role) == ("Neo", CharacterRole.HERO)
+    assert persos[0].image_url == "https://image.tmdb.org/t/p/h632/n.jpg"
+    assert (persos[1].name, persos[1].role) == ("Morpheus", CharacterRole.MAIN)
+    # Personnages sans photo ou sans nom : ignorés (pas de carte vide).
+    assert "Sans photo" not in [p.name for p in persos]
+    assert persos[-1].role == CharacterRole.BACKGROUND
+
+
+async def test_anilist_personnages_premier_role_principal_devient_heros() -> None:
+    def edge(nom: str, role: str, image: str = "https://img/x.png") -> dict[str, object]:
+        return {
+            "role": role,
+            "node": {"name": {"full": nom}, "image": {"large": image}},
+        }
+
+    reponse = {
+        "data": {
+            "Media": {
+                "characters": {
+                    "edges": [
+                        edge("Luffy", "MAIN"),
+                        edge("Zoro", "MAIN"),
+                        edge("Anonyme", "SUPPORTING", "https://s4.anilist.co/default.jpg"),
+                        edge("Koby", "SUPPORTING"),
+                    ]
+                }
+            }
+        }
+    }
+    async with faux_client(lambda _: httpx.Response(200, json=reponse)) as http:
+        persos = await AniListProvider().get_characters(http, ContentKind.ANIME, "21")
+
+    assert [(p.name, p.role) for p in persos] == [
+        ("Luffy", CharacterRole.HERO),
+        ("Zoro", CharacterRole.MAIN),
+        ("Koby", CharacterRole.SUPPORTING),  # image par défaut : ignoré
+    ]

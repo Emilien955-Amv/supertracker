@@ -52,6 +52,23 @@ class EpisodeSummary(BaseModel):
     still_url: str | None = Field(default=None, description="Image tirée de l'épisode")
 
 
+class CharacterRole(StrEnum):
+    """Importance d'un personnage : elle détermine la rareté de sa carte."""
+
+    HERO = "hero"  # LE personnage principal (premier rôle)
+    MAIN = "main"  # rôles principaux
+    SUPPORTING = "supporting"  # seconds rôles
+    BACKGROUND = "background"  # figurants et petits rôles
+
+
+class CharacterSummary(BaseModel):
+    # Uniquement le personnage : ni acteur, ni doubleur, ni réalisateur.
+    name: str
+    image_url: str
+    role: CharacterRole
+    order: int = Field(description="Rang d'importance (0 = le plus important)")
+
+
 class WatchProvider(BaseModel):
     name: str
     logo_url: str | None = None
@@ -75,7 +92,7 @@ class ContentDetail(SearchResult):
     genres: list[str] = []
     release_date: date | None = None
     end_date: date | None = None
-    runtime_minutes: int | None = Field(None, description="Durée du film ou d'un épisode")
+    runtime_minutes: int | None = Field(default=None, description="Durée du film ou d'un épisode")
     status: str | None = None
     seasons_count: int | None = None
     episodes_count: int | None = None
@@ -107,6 +124,17 @@ class MetadataProvider(Protocol):
         self, http: httpx.AsyncClient, external_id: str, season_number: int
     ) -> list[EpisodeSummary] | None:
         """Épisodes d'une saison ; None si la saison n'existe pas."""
+        ...
+
+    async def get_characters(
+        self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
+    ) -> list[CharacterSummary]:
+        """Personnages avec une image (ceux sans image sont ignorés)."""
+        ...
+
+    async def get_popular(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
+        """Contenus populaires du moment (fiches simplifiées), pour le catalogue
+        de cartes. Liste vide si la source ne gère pas ce type."""
         ...
 
 

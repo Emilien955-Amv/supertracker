@@ -32,6 +32,7 @@ class RewardsRead(BaseModel):
     badges: list[BadgeBrief]
     level_up: int | None  # nouveau niveau atteint, s'il y en a un
     streak_days: int
+    boosters: int  # boosters de cartes gagnés
 
     @classmethod
     def of(cls, rewards: Rewards) -> "RewardsRead | None":
@@ -47,6 +48,7 @@ class RewardsRead(BaseModel):
             badges=[BadgeBrief.of(badge) for badge in rewards.badges],
             level_up=rewards.level_after if rewards.level_after > rewards.level_before else None,
             streak_days=rewards.streak_days,
+            boosters=rewards.boosters,
         )
 
 

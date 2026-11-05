@@ -20,6 +20,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    Booster,
     Content,
     Episode,
     EpisodeView,
@@ -104,6 +105,7 @@ class Rewards:
     level_before: int = 1
     level_after: int = 1
     streak_days: int = 0
+    boosters: int = 0  # boosters de cartes gagnés
 
     @property
     def xp(self) -> int:
@@ -111,7 +113,7 @@ class Rewards:
 
     @property
     def is_empty(self) -> bool:
-        return not self.gains and not self.badges
+        return not self.gains and not self.badges and not self.boosters
 
 
 # --- Lecture -------------------------------------------------------------------
@@ -216,6 +218,17 @@ async def badge_progress(session: AsyncSession, user_id: int) -> dict[Metric, in
 # --- Écriture ------------------------------------------------------------------
 
 
+async def grant_booster(session: AsyncSession, user_id: int, key: str) -> bool:
+    """Donne un booster de cartes. Clé unique (ex. « level:3 ») : jamais deux fois."""
+    created = await session.scalar(
+        insert(Booster)
+        .values(user_id=user_id, key=key)
+        .on_conflict_do_nothing(index_elements=["user_id", "key"])
+        .returning(Booster.id)
+    )
+    return created is not None
+
+
 class _Session:
     """Accumule les récompenses d'une action, puis vérifie succès et niveau."""
 
@@ -295,7 +308,14 @@ class _Session:
                     self.rewards.badges.append(badge)
                     await self.award(f"badge:{badge.code}", XpKind.BADGE, TIER_XP[badge.tier])
         self.rewards.level_after = level_for_xp(await total_xp(self.session, self.user_id))
+        # Un booster de cartes par niveau gagné.
+        for level in range(self.rewards.level_before + 1, self.rewards.level_after + 1):
+            await self.booster(f"level:{level}")
         return self.rewards
+
+    async def booster(self, key: str) -> None:
+        if await grant_booster(self.session, self.user_id, key):
+            self.rewards.boosters += 1
 
 
 async def on_episodes_changed(
@@ -321,9 +341,12 @@ async def on_episodes_changed(
             if episode.air_date is not None and episode.air_date > day:
                 continue
             amount = min(round(EPISODE_XP * multiplier), remaining)
-            remaining -= await game.award(
-                f"episode:{episode.id}", XpKind.EPISODE, amount, content.id
-            )
+            gained = await game.award(f"episode:{episode.id}", XpKind.EPISODE, amount, content.id)
+            remaining -= gained
+            if gained:
+                # Un booster par épisode vu, s'il a rapporté des XP : le plafond
+                # quotidien et les clés uniques empêchent d'en abuser.
+                await game.booster(f"episode:{episode.id}")
             if episode.air_date is not None and episode.air_date >= day - timedelta(days=1):
                 await game.award(f"jour_j:{episode.id}", XpKind.JOUR_J, JOUR_J_XP, content.id)
 
@@ -393,3 +416,4 @@ async def _status_rewards(
         await game.award(f"movie:{content.id}", XpKind.MOVIE, amount, content.id)
     else:
         await game.award(f"completion:{content.id}", XpKind.COMPLETION, COMPLETION_XP, content.id)
+        await game.booster(f"completion:{content.id}")  # série terminée : un booster
