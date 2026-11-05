@@ -1,0 +1,3 @@
+# Force les fins de ligne Unix (LF) : indispensable pour les scripts
+# exécutés dans les conteneurs Linux, même si vous travaillez sous Windows.
+* text=auto eol=lf

@@ -1,0 +1,25 @@
+# Secrets et configuration locale
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node / Vite
+node_modules/
+dist/
+dev-dist/
+
+# Éditeurs et système
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
