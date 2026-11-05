@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router";
 
 import { Attribution } from "../components/Attribution";
 import { Poster } from "../components/Poster";
+import { WatchProviders } from "../components/WatchProviders";
 import { ApiError } from "../lib/api";
 import { KIND_LABELS, SOURCE_LABELS, formatDate, formatRuntime } from "../lib/catalog";
 import type { ContentDetail } from "../lib/catalog";
@@ -119,6 +120,9 @@ export default function ContentPage() {
             ))}
           </dl>
         )}
+
+        {/* Absent pour les sources qui ne fournissent pas l'information (AniList). */}
+        {content.watch && <WatchProviders watch={content.watch} />}
 
         {content.seasons.length > 0 && (
           <section aria-labelledby="saisons" className="mt-8">

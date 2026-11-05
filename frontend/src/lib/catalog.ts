@@ -28,6 +28,18 @@ export type SeasonSummary = {
   poster_url: string | null;
 };
 
+export type WatchProvider = { name: string; logo_url: string | null };
+
+/** Où regarder (données JustWatch transmises par TMDB). */
+export type WatchAvailability = {
+  region: string;
+  link: string | null;
+  subscription: WatchProvider[];
+  free: WatchProvider[];
+  rent: WatchProvider[];
+  buy: WatchProvider[];
+};
+
 export type ContentDetail = SearchResult & {
   backdrop_url: string | null;
   genres: string[];
@@ -39,6 +51,7 @@ export type ContentDetail = SearchResult & {
   episodes_count: number | null;
   seasons: SeasonSummary[];
   source_url: string;
+  watch: WatchAvailability | null;
 };
 
 export const KIND_LABELS: Record<ContentKind, string> = {

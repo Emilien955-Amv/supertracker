@@ -182,3 +182,70 @@ async def test_anilist_refuse_un_autre_type() -> None:
     async with faux_client(lambda _: httpx.Response(500)) as http:
         # Aucun appel réseau : AniList ne gère que les animes.
         assert await AniListProvider().get_detail(http, ContentKind.MOVIE, "21") is None
+
+
+# --- Où regarder (données JustWatch via TMDB) ---------------------------------
+
+TMDB_FILM_AVEC_PLATEFORMES = {
+    "id": 603,
+    "title": "Matrix",
+    "release_date": "1999-03-30",
+    "runtime": 136,
+    "status": "Released",
+    "genres": [],
+    "watch/providers": {
+        "results": {
+            "FR": {
+                "link": "https://www.themoviedb.org/movie/603/watch?locale=FR",
+                "flatrate": [
+                    {"provider_name": "Max", "logo_path": "/max.png", "display_priority": 5},
+                    {"provider_name": "Netflix", "logo_path": "/nf.png", "display_priority": 1},
+                    {"provider_name": "Netflix Standard with Ads", "display_priority": 2},
+                    {"provider_name": "Max Amazon Channel", "display_priority": 6},
+                ],
+                "rent": [{"provider_name": "Apple TV", "logo_path": "/apple.png"}],
+                "ads": [{"provider_name": "Pluto TV", "display_priority": 2}],
+                "free": [{"provider_name": "Pluto TV", "display_priority": 2}],
+            },
+            "US": {"flatrate": [{"provider_name": "Hulu"}]},
+        }
+    },
+}
+
+
+async def test_tmdb_plateformes_de_diffusion_en_france() -> None:
+    requetes: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requetes.append(request)
+        return httpx.Response(200, json=TMDB_FILM_AVEC_PLATEFORMES)
+
+    async with faux_client(handler) as http:
+        fiche = await TmdbProvider("jeton").get_detail(http, ContentKind.MOVIE, "603")
+
+    assert fiche is not None and fiche.watch is not None
+    # Un seul appel : fiche et plateformes demandées ensemble.
+    assert len(requetes) == 1
+    assert requetes[0].url.params["append_to_response"] == "watch/providers"
+
+    watch = fiche.watch
+    assert watch.region == "FR"
+    assert watch.link == "https://www.themoviedb.org/movie/603/watch?locale=FR"
+    # Triés par priorité, variantes (« with Ads », « Amazon Channel ») masquées.
+    assert [p.name for p in watch.subscription] == ["Netflix", "Max"]
+    assert watch.subscription[0].logo_url == "https://image.tmdb.org/t/p/w92/nf.png"
+    assert [p.name for p in watch.free] == ["Pluto TV"]  # doublon « ads »/« free » fusionné
+    assert [p.name for p in watch.rent] == ["Apple TV"]
+    assert watch.buy == []
+    # Hulu n'est disponible qu'aux États-Unis : absent de la liste française.
+    assert "Hulu" not in [p.name for p in watch.subscription]
+
+
+async def test_tmdb_aucune_plateforme() -> None:
+    sans = {**TMDB_FILM_AVEC_PLATEFORMES, "watch/providers": {"results": {}}}
+    async with faux_client(lambda _: httpx.Response(200, json=sans)) as http:
+        fiche = await TmdbProvider("jeton").get_detail(http, ContentKind.MOVIE, "603")
+
+    assert fiche is not None and fiche.watch is not None
+    assert fiche.watch.subscription == fiche.watch.rent == fiche.watch.buy == []
+    assert fiche.watch.link is None

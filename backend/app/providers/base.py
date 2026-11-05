@@ -43,6 +43,22 @@ class SeasonSummary(BaseModel):
     poster_url: str | None = None
 
 
+class WatchProvider(BaseModel):
+    name: str
+    logo_url: str | None = None
+
+
+class WatchAvailability(BaseModel):
+    """Où regarder un contenu dans un pays donné (données JustWatch via TMDB)."""
+
+    region: str = Field(description="Code pays ISO, ex. « FR »")
+    link: str | None = Field(None, description="Page récapitulant toutes les offres")
+    subscription: list[WatchProvider] = Field([], description="Inclus dans un abonnement")
+    free: list[WatchProvider] = Field([], description="Gratuit, avec ou sans publicités")
+    rent: list[WatchProvider] = Field([], description="Location")
+    buy: list[WatchProvider] = Field([], description="Achat")
+
+
 class ContentDetail(SearchResult):
     backdrop_url: str | None = None
     genres: list[str] = []
@@ -54,6 +70,8 @@ class ContentDetail(SearchResult):
     episodes_count: int | None = None
     seasons: list[SeasonSummary] = []
     source_url: str = Field(description="Page du contenu sur le site de la source")
+    # None : la source ne fournit pas cette information (ex. AniList).
+    watch: WatchAvailability | None = None
 
 
 class ProviderError(Exception):

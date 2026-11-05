@@ -108,6 +108,14 @@ describe("Fiche contenu", () => {
           episodes_count: 73,
           seasons: [{ number: 1, name: "Saison 1", episode_count: 10, air_date: "2011-04-17", poster_url: null }],
           source_url: "https://www.themoviedb.org/tv/1399",
+          watch: {
+            region: "FR",
+            link: "https://www.themoviedb.org/tv/1399/watch?locale=FR",
+            subscription: [{ name: "HBO Max", logo_url: "https://image.tmdb.org/t/p/w92/max.png" }],
+            free: [],
+            rent: [],
+            buy: [{ name: "Apple TV", logo_url: null }],
+          },
         },
       },
     });
@@ -117,6 +125,11 @@ describe("Fiche contenu", () => {
     expect(screen.getByText("17 avril 2011")).toBeTruthy();
     expect(screen.getByText("Terminée")).toBeTruthy();
     expect(screen.getByText("10 épisodes · 2011")).toBeTruthy();
+    // Où regarder : logos par catégorie, catégories vides masquées, mention JustWatch.
+    expect(screen.getByRole("img", { name: "HBO Max" })).toBeTruthy();
+    expect(screen.getByText("Apple TV")).toBeTruthy();
+    expect(screen.queryByText("Location")).toBeNull();
+    expect(screen.getByRole("link", { name: "JustWatch" })).toBeTruthy();
   });
 
   it("affiche un message clair si le contenu n'existe pas", async () => {

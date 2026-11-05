@@ -16,11 +16,15 @@ from app.providers.base import (
     SearchResult,
     SeasonSummary,
     Source,
+    WatchAvailability,
+    WatchProvider,
     parse_date,
 )
 
 API_URL = "https://api.themoviedb.org/3"
 IMAGE_URL = "https://image.tmdb.org/t/p"
+
+VARIANT_SUFFIXES = (" Amazon Channel", " with Ads")
 
 # TMDB renvoie les statuts en anglais, même en demandant le français.
 STATUTS = {
@@ -49,8 +53,9 @@ def _year(value: str | None) -> int | None:
 class TmdbProvider:
     source = Source.TMDB
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, region: str = "FR") -> None:
         self._headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        self._region = region
 
     async def _get(self, http: httpx.AsyncClient, path: str, **params: str) -> dict[str, Any]:
         try:
@@ -94,13 +99,52 @@ class TmdbProvider:
     async def get_detail(
         self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
     ) -> ContentDetail | None:
+        # « append_to_response » : la fiche ET les plateformes de diffusion en
+        # un seul appel, au lieu de deux.
+        extra = {"append_to_response": "watch/providers"}
         if kind == ContentKind.MOVIE:
-            data = await self._get(http, f"/movie/{external_id}")
+            data = await self._get(http, f"/movie/{external_id}", **extra)
             return self._movie(data) if data else None
         if kind == ContentKind.SERIES:
-            data = await self._get(http, f"/tv/{external_id}")
+            data = await self._get(http, f"/tv/{external_id}", **extra)
             return self._series(data) if data else None
         return None
+
+    def _watch(self, data: dict[str, Any]) -> WatchAvailability:
+        """Plateformes disponibles dans le pays choisi.
+
+        Ces données viennent de JustWatch, partenaire de TMDB : la mention
+        « JustWatch » doit être affichée à côté (conditions d'utilisation).
+        """
+        offers = ((data.get("watch/providers") or {}).get("results") or {}).get(self._region) or {}
+
+        def providers(*keys: str) -> list[WatchProvider]:
+            items = [item for key in keys for item in offers.get(key, [])]
+            items.sort(key=lambda item: item.get("display_priority", 999))
+            seen: set[str] = set()
+            result = []
+            for item in items:
+                name = item.get("provider_name")
+                if name and name not in seen:  # « ads » et « free » peuvent se recouper
+                    seen.add(name)
+                    result.append(
+                        WatchProvider(name=name, logo_url=_image(item.get("logo_path"), "w92"))
+                    )
+            # Variantes d'une même offre (« Netflix Standard with Ads »,
+            # « Crunchyroll Amazon Channel »…) : on les masque s'il reste
+            # d'autres plateformes, pour garder une liste lisible.
+            if len(result) > 1:
+                result = [p for p in result if not p.name.endswith(VARIANT_SUFFIXES)] or result
+            return result
+
+        return WatchAvailability(
+            region=self._region,
+            link=offers.get("link"),
+            subscription=providers("flatrate"),
+            free=providers("free", "ads"),
+            rent=providers("rent"),
+            buy=providers("buy"),
+        )
 
     def _movie(self, data: dict[str, Any]) -> ContentDetail:
         return ContentDetail(
@@ -118,6 +162,7 @@ class TmdbProvider:
             runtime_minutes=data.get("runtime") or None,
             status=STATUTS.get(data.get("status", ""), data.get("status")),
             source_url=f"https://www.themoviedb.org/movie/{data['id']}",
+            watch=self._watch(data),
         )
 
     def _series(self, data: dict[str, Any]) -> ContentDetail:
@@ -154,4 +199,5 @@ class TmdbProvider:
             # La « saison 0 » regroupe les épisodes spéciaux : on la place à la fin.
             seasons=sorted(seasons, key=lambda s: (s.number == 0, s.number)),
             source_url=f"https://www.themoviedb.org/tv/{data['id']}",
+            watch=self._watch(data),
         )
