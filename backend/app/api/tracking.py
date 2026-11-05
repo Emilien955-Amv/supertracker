@@ -12,6 +12,7 @@ from app.api.deps import CurrentUser, ExternalId, HttpDep, ProvidersDep, Session
 from app.core.rate_limit import enforce_rate_limit
 from app.models import Content, TrackingStatus
 from app.providers.base import ContentKind, ProviderError, Source
+from app.schemas.gamification import RewardsRead
 from app.schemas.tracking import (
     ContentRead,
     ContentState,
@@ -24,6 +25,7 @@ from app.schemas.tracking import (
 )
 from app.services import content as content_service
 from app.services import tracking as tracking_service
+from app.services.gamification import Rewards
 
 router = APIRouter(prefix="/tracking", tags=["Suivi"])
 
@@ -59,13 +61,16 @@ async def _load_content(
         ) from None
 
 
-async def _state(session: SessionDep, user_id: int, content: Content) -> ContentState:
+async def _state(
+    session: SessionDep, user_id: int, content: Content, rewards: Rewards | None = None
+) -> ContentState:
     tracking = await tracking_service.get_tracking(session, user_id, content.id)
     progress = await tracking_service.get_progress(session, user_id, content, tracking)
     return ContentState(
         content_id=content.id,
         tracking=TrackingRead.model_validate(tracking) if tracking else None,
         progress=ProgressRead.of(progress),
+        rewards=RewardsRead.of(rewards) if rewards else None,
     )
 
 
@@ -117,10 +122,10 @@ async def save_tracking(
     body: TrackingWrite,
 ) -> ContentState:
     content = await _load_content(session, http, providers, user.id, source, kind, external_id)
-    await tracking_service.save_tracking(
+    _, rewards = await tracking_service.save_tracking(
         session, user.id, content, body.status, body.rating, body.review or None
     )
-    return await _state(session, user.id, content)
+    return await _state(session, user.id, content, rewards)
 
 
 @router.delete(CONTENT_PATH, status_code=status.HTTP_204_NO_CONTENT, summary="Retirer de mon suivi")
@@ -190,9 +195,9 @@ async def mark_episodes(
 ) -> ContentState:
     content = await _load_content(session, http, providers, user.id, source, kind, external_id)
     try:
-        await tracking_service.set_episodes_watched(
+        _, rewards = await tracking_service.set_episodes_watched(
             session, user.id, content, body.episode_ids, body.watched
         )
     except tracking_service.EpisodeNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Épisode introuvable.") from None
-    return await _state(session, user.id, content)
+    return await _state(session, user.id, content, rewards)

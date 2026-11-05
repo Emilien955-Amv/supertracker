@@ -5,8 +5,33 @@ import { HealthCard } from "../components/HealthCard";
 import { Poster } from "../components/Poster";
 import { ProgressBar } from "../components/ProgressBar";
 import { contentPath } from "../lib/catalog";
+import { levelPercent } from "../lib/gamification";
+import type { Profile } from "../lib/gamification";
 import type { TrackedItem } from "../lib/tracking";
 import { useApi } from "../lib/useApi";
+
+/** Raccourci vers le profil : niveau et série de jours. */
+function LevelCard() {
+  const state = useApi<Profile>("/api/gamification/me");
+  if (state.status !== "success") return null;
+  const profile = state.data;
+  return (
+    <Link
+      to="/profil"
+      className="block rounded-2xl border border-border bg-surface p-4 hover:border-accent/60"
+    >
+      <div className="flex items-baseline justify-between">
+        <span className="font-semibold">Niveau {profile.level}</span>
+        <span className="text-sm text-muted">
+          <span aria-hidden="true">🔥</span> {profile.streak_days} j · {profile.xp} XP
+        </span>
+      </div>
+      <div className="mt-2">
+        <ProgressBar percent={levelPercent(profile)} label={`Progression vers le niveau ${profile.level + 1}`} />
+      </div>
+    </Link>
+  );
+}
 
 /** « Continuer à regarder » : les contenus en cours, du plus récent au plus ancien. */
 function ContinueWatching() {
@@ -73,6 +98,8 @@ export default function HomePage() {
           →
         </span>
       </Link>
+
+      <LevelCard />
 
       <ContinueWatching />
 

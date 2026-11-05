@@ -8,6 +8,7 @@ import HomePage from "./pages/HomePage";
 import LibrariesPage from "./pages/LibrariesPage";
 import LibraryPage from "./pages/LibraryPage";
 import LoginPage from "./pages/LoginPage";
+import ProfilePage from "./pages/ProfilePage";
 import RegisterPage from "./pages/RegisterPage";
 import SearchPage from "./pages/SearchPage";
 import TrackingListPage from "./pages/TrackingListPage";
@@ -32,6 +33,7 @@ export function AppRoutes() {
         <Route path="/suivi" element={<TrackingListPage />} />
         <Route path="/bibliotheques" element={<LibrariesPage />} />
         <Route path="/bibliotheques/:id" element={<LibraryPage />} />
+        <Route path="/profil" element={<ProfilePage />} />
       </Route>
 
       <Route

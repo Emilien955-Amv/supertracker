@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Content, Episode, EpisodeView, Tracking, TrackingStatus
 from app.providers.base import ContentKind
+from app.services import gamification
+from app.services.gamification import Rewards
 
 
 class EpisodeNotFoundError(Exception):
@@ -104,14 +106,21 @@ async def save_tracking(
     status: TrackingStatus,
     rating: int | None,
     review: str | None,
-) -> Tracking:
+) -> tuple[Tracking, Rewards]:
+    existing = await get_tracking(session, user_id, content.id)
+    status_before = existing.status if existing else None
     tracking = await _get_or_create(session, user_id, content.id, status)
     _apply_status(tracking, status)
     tracking.rating = rating
     tracking.review = review
+    await session.flush()
+    # Même transaction : suivi et XP sont enregistrés ensemble, ou pas du tout.
+    rewards = await gamification.on_status_changed(
+        session, user_id, content, status_before, tracking.status
+    )
     await session.commit()
     await session.refresh(tracking)
-    return tracking
+    return tracking, rewards
 
 
 async def delete_tracking(session: AsyncSession, user_id: int, content: Content) -> None:
@@ -125,6 +134,7 @@ async def delete_tracking(session: AsyncSession, user_id: int, content: Content)
             EpisodeView.episode_id.in_(select(Episode.id).where(Episode.content_id == content.id)),
         )
     )
+    await gamification.forget_content(session, user_id, content.id)
     await session.commit()
 
 
@@ -147,7 +157,7 @@ async def set_episodes_watched(
     content: Content,
     episode_ids: list[int],
     watched: bool,
-) -> Tracking | None:
+) -> tuple[Tracking | None, Rewards]:
     """Coche ou décoche des épisodes, puis ajuste le statut automatiquement :
     - premier épisode coché → « en cours » ;
     - tous les épisodes d'une série terminée cochés → « terminé » ;
@@ -163,20 +173,25 @@ async def set_episodes_watched(
     if valid != unique_ids:
         raise EpisodeNotFoundError
 
+    # RETURNING : on récupère les épisodes VRAIMENT changés (un épisode déjà
+    # coché ne rapporte pas de points une seconde fois).
     if watched:
-        await session.execute(
+        changed = await session.scalars(
             insert(EpisodeView)
             .values([{"user_id": user_id, "episode_id": eid} for eid in sorted(valid)])
             .on_conflict_do_nothing()
+            .returning(EpisodeView.episode_id)
         )
     else:
-        await session.execute(
-            delete(EpisodeView).where(
-                EpisodeView.user_id == user_id, EpisodeView.episode_id.in_(valid)
-            )
+        changed = await session.scalars(
+            delete(EpisodeView)
+            .where(EpisodeView.user_id == user_id, EpisodeView.episode_id.in_(valid))
+            .returning(EpisodeView.episode_id)
         )
+    changed_ids = set(changed)
 
     tracking = await get_tracking(session, user_id, content.id)
+    status_before = tracking.status if tracking else None
     if tracking is None and watched:
         tracking = await _get_or_create(session, user_id, content.id, TrackingStatus.WATCHING)
 
@@ -192,10 +207,24 @@ async def set_episodes_watched(
         # Remonte le contenu en haut de « Mon suivi » (tri par activité récente).
         tracking.updated_at = _now()
 
+    episodes = list(
+        await session.scalars(
+            select(Episode).where(Episode.id.in_(changed_ids)).order_by(Episode.number)
+        )
+    )
+    rewards = await gamification.on_episodes_changed(
+        session,
+        user_id,
+        content,
+        episodes,
+        watched,
+        status_before,
+        tracking.status if tracking else None,
+    )
     await session.commit()
     if tracking is not None:
         await session.refresh(tracking)
-    return tracking
+    return tracking, rewards
 
 
 async def list_trackings(

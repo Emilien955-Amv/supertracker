@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { apiFetch } from "../lib/api";
+import { announceRewards } from "../lib/gamification";
 import { STATUSES, STATUS_LABELS } from "../lib/tracking";
 import type { ContentState, TrackingStatus } from "../lib/tracking";
 import { ProgressBar } from "./ProgressBar";
@@ -39,6 +40,7 @@ export function TrackingPanel({ path, state, onChange, isMovie }: Props) {
         body: { status, rating, review: review.trim() || null },
       });
       onChange(next);
+      announceRewards(next.rewards);
       setMessage({ kind: "ok", text: confirmation });
     } catch (error) {
       setMessage({ kind: "error", text: error instanceof Error ? error.message : "Échec." });

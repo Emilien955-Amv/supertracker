@@ -19,6 +19,7 @@ from app.schemas.library import (
 )
 from app.schemas.tracking import ContentRead
 from app.services import content as content_service
+from app.services import gamification
 from app.services import libraries as service
 
 router = APIRouter(prefix="/libraries", tags=["Bibliothèques"])
@@ -90,6 +91,9 @@ async def create_library(
             status.HTTP_409_CONFLICT,
             f"Limite atteinte : {service.MAX_LIBRARIES} bibliothèques au maximum.",
         ) from None
+    # Succès « Bibliothécaire » : visible ensuite sur le profil.
+    await gamification.check_badges(session, user.id)
+    await session.commit()
     return LibraryRead.model_validate(library)
 
 

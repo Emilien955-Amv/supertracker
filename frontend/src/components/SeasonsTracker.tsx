@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { apiFetch } from "../lib/api";
 import { formatDate } from "../lib/catalog";
+import { announceRewards } from "../lib/gamification";
 import type { SeasonSummary } from "../lib/catalog";
 import type { ContentState, EpisodeRead } from "../lib/tracking";
 import { Poster } from "./Poster";
@@ -80,6 +81,7 @@ function Season({
         body: { episode_ids: ids, watched },
       });
       onStateChange(state);
+      announceRewards(state.rewards);
     } catch (err) {
       setLoad({ status: "ready", episodes: previous });
       setError(err instanceof Error ? err.message : "Échec de l'enregistrement.");

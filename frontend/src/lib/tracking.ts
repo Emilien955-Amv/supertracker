@@ -2,6 +2,7 @@
  * (app/schemas/tracking.py et app/schemas/library.py). */
 
 import type { ContentKind, Source } from "./catalog";
+import type { Rewards } from "./gamification";
 
 export type TrackingStatus = "planned" | "watching" | "completed" | "paused" | "dropped";
 
@@ -50,6 +51,8 @@ export type ContentState = {
   content_id: number | null;
   tracking: TrackingRead | null;
   progress: Progress;
+  /** Ce que la dernière action a rapporté (absent en simple lecture). */
+  rewards?: Rewards | null;
 };
 
 export type TrackedItem = { content: ContentRead; tracking: TrackingRead; progress: Progress };

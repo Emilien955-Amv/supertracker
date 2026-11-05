@@ -11,7 +11,7 @@ import structlog
 from fastapi import FastAPI
 
 from app import __version__
-from app.api import auth, catalog, health, libraries, tracking, users
+from app.api import auth, catalog, gamification, health, libraries, tracking, users
 from app.cache import redis_client
 from app.config import get_settings
 from app.db import engine
@@ -48,6 +48,7 @@ def create_app() -> FastAPI:
         catalog.router,
         tracking.router,
         libraries.router,
+        gamification.router,
     ):
         app.include_router(router, prefix="/api")
     return app

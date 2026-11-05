@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.models import TrackingStatus
 from app.providers.base import ContentKind, Source
+from app.schemas.gamification import RewardsRead
 from app.services.tracking import Progress
 
 
@@ -59,6 +60,8 @@ class ContentState(BaseModel):
     content_id: int | None = Field(description="Identifiant interne (None : jamais enregistré)")
     tracking: TrackingRead | None
     progress: ProgressRead
+    # Récompenses de l'action qui vient d'avoir lieu (absent en simple lecture).
+    rewards: RewardsRead | None = None
 
 
 class TrackedItem(BaseModel):
