@@ -55,6 +55,8 @@ class EpisodeSummary(BaseModel):
 class WatchProvider(BaseModel):
     name: str
     logo_url: str | None = None
+    # Lien vers le titre sur la plateforme (None : plateforme non reconnue).
+    url: str | None = None
 
 
 class WatchAvailability(BaseModel):

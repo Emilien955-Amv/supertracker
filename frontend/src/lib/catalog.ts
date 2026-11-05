@@ -28,7 +28,8 @@ export type SeasonSummary = {
   poster_url: string | null;
 };
 
-export type WatchProvider = { name: string; logo_url: string | null };
+/** url : lien vers le titre sur la plateforme (null si plateforme non reconnue). */
+export type WatchProvider = { name: string; logo_url: string | null; url?: string | null };
 
 /** Où regarder (données JustWatch transmises par TMDB). */
 export type WatchAvailability = {

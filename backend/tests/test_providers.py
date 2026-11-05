@@ -14,6 +14,7 @@ import pytest
 from app.providers.anilist import AniListProvider
 from app.providers.base import ContentKind, ProviderError, Source
 from app.providers.tmdb import TmdbProvider
+from app.providers.watch_links import search_url
 
 
 def faux_client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.AsyncClient:
@@ -234,6 +235,9 @@ async def test_tmdb_plateformes_de_diffusion_en_france() -> None:
     # Triés par priorité, variantes (« with Ads », « Amazon Channel ») masquées.
     assert [p.name for p in watch.subscription] == ["Netflix", "Max"]
     assert watch.subscription[0].logo_url == "https://image.tmdb.org/t/p/w92/nf.png"
+    # Lien direct vers la recherche Netflix ; « Max » n'est pas reconnu (None).
+    assert watch.subscription[0].url == "https://www.netflix.com/search?q=Matrix"
+    assert watch.subscription[1].url is None
     assert [p.name for p in watch.free] == ["Pluto TV"]  # doublon « ads »/« free » fusionné
     assert [p.name for p in watch.rent] == ["Apple TV"]
     assert watch.buy == []
@@ -309,3 +313,13 @@ async def test_anilist_anime_en_cours_compte_les_episodes_diffuses() -> None:
     assert len(episodes) == 1149
     assert (episodes[0].number, episodes[-1].number) == (1, 1149)
     assert autre_saison is None  # AniList n'a qu'une « saison »
+
+
+def test_lien_de_recherche_encode_le_titre() -> None:
+    assert search_url("Crunchyroll", "One Piece") == (
+        "https://www.crunchyroll.com/fr/search?q=One%20Piece"
+    )
+    assert search_url("Apple TV", "Amélie & co") == (
+        "https://tv.apple.com/fr/search?term=Am%C3%A9lie%20%26%20co"
+    )
+    assert search_url("Disney Plus", "Matrix") is None  # pas de lien vérifié : page des offres

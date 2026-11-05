@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -14,7 +15,7 @@ from app.core.rate_limit import KEY_PREFIX
 from app.db import engine, get_session
 from app.http_client import get_http_client
 from app.main import app
-from app.models import User
+from app.models import Content, User
 from app.providers.base import (
     ContentDetail,
     ContentKind,
@@ -163,6 +164,12 @@ async def contexte(db_client: AsyncClient, db_session: AsyncSession) -> AsyncIte
     alice = User(email="alice@exemple.fr", username="alice_test", password_hash="x")
     bob = User(email="bob@exemple.fr", username="bob_test", password_hash="x")
     db_session.add_all([alice, bob])
+    # Les contenus de la fausse source existent peut-être déjà dans la base
+    # locale (essais à la main) : on les retire DANS la transaction du test,
+    # annulée à la fin. Les vraies données ne sont donc jamais touchées.
+    await db_session.execute(
+        delete(Content).where(Content.source == "tmdb", Content.external_id.in_(["603", "1399"]))
+    )
     await db_session.commit()
 
     # Cache vidé : les fiches doivent venir de la fausse source, pas de Redis.

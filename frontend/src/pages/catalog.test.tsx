@@ -111,7 +111,14 @@ describe("Fiche contenu", () => {
           watch: {
             region: "FR",
             link: "https://www.themoviedb.org/tv/1399/watch?locale=FR",
-            subscription: [{ name: "HBO Max", logo_url: "https://image.tmdb.org/t/p/w92/max.png" }],
+            subscription: [
+              {
+                name: "Netflix",
+                logo_url: "https://image.tmdb.org/t/p/w92/nf.png",
+                url: "https://www.netflix.com/search?q=Game%20of%20Thrones",
+              },
+              { name: "HBO Max", logo_url: "https://image.tmdb.org/t/p/w92/max.png", url: null },
+            ],
             free: [],
             rent: [],
             buy: [{ name: "Apple TV", logo_url: null }],
@@ -127,6 +134,13 @@ describe("Fiche contenu", () => {
     expect(screen.getByText("10 épisodes · 2011")).toBeTruthy();
     // Où regarder : logos par catégorie, catégories vides masquées, mention JustWatch.
     expect(screen.getByRole("img", { name: "HBO Max" })).toBeTruthy();
+    // Logo cliquable : lien direct si la plateforme est connue, sinon page des offres.
+    expect(screen.getByRole("link", { name: /Regarder sur Netflix/ }).getAttribute("href")).toBe(
+      "https://www.netflix.com/search?q=Game%20of%20Thrones",
+    );
+    expect(screen.getByRole("link", { name: /Regarder sur HBO Max/ }).getAttribute("href")).toBe(
+      "https://www.themoviedb.org/tv/1399/watch?locale=FR",
+    );
     expect(screen.getByText("Apple TV")).toBeTruthy();
     expect(screen.queryByText("Location")).toBeNull();
     expect(screen.getByRole("link", { name: "JustWatch" })).toBeTruthy();

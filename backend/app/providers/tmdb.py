@@ -21,6 +21,7 @@ from app.providers.base import (
     WatchProvider,
     parse_date,
 )
+from app.providers.watch_links import search_url
 
 API_URL = "https://api.themoviedb.org/3"
 IMAGE_URL = "https://image.tmdb.org/t/p"
@@ -131,7 +132,7 @@ class TmdbProvider:
             if isinstance(episode.get("episode_number"), int)
         ]
 
-    def _watch(self, data: dict[str, Any]) -> WatchAvailability:
+    def _watch(self, data: dict[str, Any], title: str) -> WatchAvailability:
         """Plateformes disponibles dans le pays choisi.
 
         Ces données viennent de JustWatch, partenaire de TMDB : la mention
@@ -149,7 +150,11 @@ class TmdbProvider:
                 if name and name not in seen:  # « ads » et « free » peuvent se recouper
                     seen.add(name)
                     result.append(
-                        WatchProvider(name=name, logo_url=_image(item.get("logo_path"), "w92"))
+                        WatchProvider(
+                            name=name,
+                            logo_url=_image(item.get("logo_path"), "w92"),
+                            url=search_url(name, title),
+                        )
                     )
             # Variantes d'une même offre (« Netflix Standard with Ads »,
             # « Crunchyroll Amazon Channel »…) : on les masque s'il reste
@@ -168,11 +173,12 @@ class TmdbProvider:
         )
 
     def _movie(self, data: dict[str, Any]) -> ContentDetail:
+        title = data.get("title") or "Sans titre"
         return ContentDetail(
             source=Source.TMDB,
             kind=ContentKind.MOVIE,
             external_id=str(data["id"]),
-            title=data.get("title") or "Sans titre",
+            title=title,
             original_title=data.get("original_title"),
             year=_year(data.get("release_date")),
             poster_url=_image(data.get("poster_path"), "w500"),
@@ -184,10 +190,11 @@ class TmdbProvider:
             status=STATUTS.get(data.get("status", ""), data.get("status")),
             source_url=f"https://www.themoviedb.org/movie/{data['id']}",
             is_finished=data.get("status") == "Released",
-            watch=self._watch(data),
+            watch=self._watch(data, title),
         )
 
     def _series(self, data: dict[str, Any]) -> ContentDetail:
+        title = data.get("name") or "Sans titre"
         run_times = data.get("episode_run_time") or []
         seasons = [
             SeasonSummary(
@@ -203,7 +210,7 @@ class TmdbProvider:
             source=Source.TMDB,
             kind=ContentKind.SERIES,
             external_id=str(data["id"]),
-            title=data.get("name") or "Sans titre",
+            title=title,
             original_title=data.get("original_name"),
             year=_year(data.get("first_air_date")),
             poster_url=_image(data.get("poster_path"), "w500"),
@@ -222,5 +229,5 @@ class TmdbProvider:
             seasons=sorted(seasons, key=lambda s: (s.number == 0, s.number)),
             source_url=f"https://www.themoviedb.org/tv/{data['id']}",
             is_finished=data.get("status") in ("Ended", "Canceled"),
-            watch=self._watch(data),
+            watch=self._watch(data, title),
         )

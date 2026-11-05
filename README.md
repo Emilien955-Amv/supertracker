@@ -5,7 +5,7 @@ jeux vidéo, avec bibliothèques personnalisées, gamification et cartes à
 collectionner.
 
 > **État actuel : étape 1c.** Comptes utilisateurs sécurisés, recherche unifiée de films,
-> séries et animes (TMDB, AniList) avec fiche détaillée, « où regarder » et cache Redis ;
+> séries et animes (TMDB, AniList) avec fiche détaillée, « où regarder » (logos cliquables) et cache Redis ;
 > suivi (statut, note, avis), épisodes cochés un par un avec progression, et
 > bibliothèques personnelles colorées (grille, étagère ou liste ; tri au choix).
 
