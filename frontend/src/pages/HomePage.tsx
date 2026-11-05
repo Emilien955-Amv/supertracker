@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+
 import { useAuth } from "../auth/AuthContext";
 import { HealthCard } from "../components/HealthCard";
 
@@ -13,7 +15,7 @@ export default function HomePage() {
         <div>
           <p className="text-sm font-medium uppercase tracking-widest text-accent">SuperTracker</p>
           <h1 className="mt-1 text-3xl font-bold">Bonjour {state.user.username} 👋</h1>
-          <p className="mt-2 text-muted">Votre compte est prêt. La suite arrive bientôt !</p>
+          <p className="mt-2 text-muted">Que regardons-nous aujourd'hui ?</p>
         </div>
         <button
           type="button"
@@ -23,6 +25,19 @@ export default function HomePage() {
           Se déconnecter
         </button>
       </header>
+
+      <Link
+        to="/recherche"
+        className="flex items-center justify-between rounded-2xl border border-accent/40 bg-accent/10 p-5 hover:bg-accent/20"
+      >
+        <span>
+          <span className="block text-lg font-semibold">Trouver un contenu</span>
+          <span className="text-sm text-muted">Films, séries et animes</span>
+        </span>
+        <span aria-hidden="true" className="text-2xl text-accent">
+          →
+        </span>
+      </Link>
 
       <HealthCard />
 

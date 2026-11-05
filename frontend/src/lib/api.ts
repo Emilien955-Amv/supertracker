@@ -63,11 +63,16 @@ export function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
-type RequestOptions = { method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; body?: unknown };
+type RequestOptions = {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: unknown;
+  /** Permet d'annuler la requête (ex. l'utilisateur a quitté la page). */
+  signal?: AbortSignal;
+};
 
 export async function apiFetch<T>(
   path: string,
-  { method = "GET", body }: RequestOptions = {},
+  { method = "GET", body, signal }: RequestOptions = {},
   retryOnUnauthorized = true,
 ): Promise<T> {
   const headers: Record<string, string> = {};
@@ -79,10 +84,11 @@ export async function apiFetch<T>(
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: "same-origin",
+    signal,
   });
 
   if (response.status === 401 && retryOnUnauthorized && accessToken) {
-    if (await refreshAccessToken()) return apiFetch<T>(path, { method, body }, false);
+    if (await refreshAccessToken()) return apiFetch<T>(path, { method, body, signal }, false);
   }
   if (!response.ok) throw await toApiError(response);
   if (response.status === 204) return undefined as T;

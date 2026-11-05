@@ -11,10 +11,11 @@ import structlog
 from fastapi import FastAPI
 
 from app import __version__
-from app.api import auth, health, users
+from app.api import auth, catalog, health, users
 from app.cache import redis_client
 from app.config import get_settings
 from app.db import engine
+from app.http_client import close_http_client
 from app.logging import configure_logging
 
 
@@ -25,6 +26,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     structlog.get_logger().info("app.startup", environment=get_settings().environment)
     yield
     # Arrêt propre : on libère les connexions ouvertes.
+    await close_http_client()
     await redis_client.aclose()
     await engine.dispose()
 
@@ -39,7 +41,7 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
-    for router in (health.router, auth.router, users.router):
+    for router in (health.router, auth.router, users.router, catalog.router):
         app.include_router(router, prefix="/api")
     return app
 

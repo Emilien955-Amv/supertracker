@@ -1,0 +1,157 @@
+"""Source TMDB (The Movie Database) : films et séries.
+
+Documentation : https://developer.themoviedb.org/reference
+Mention obligatoire (conditions d'utilisation) : l'application doit indiquer
+qu'elle utilise l'API TMDB sans être approuvée ni certifiée par TMDB.
+"""
+
+from typing import Any
+
+import httpx
+
+from app.providers.base import (
+    ContentDetail,
+    ContentKind,
+    ProviderError,
+    SearchResult,
+    SeasonSummary,
+    Source,
+    parse_date,
+)
+
+API_URL = "https://api.themoviedb.org/3"
+IMAGE_URL = "https://image.tmdb.org/t/p"
+
+# TMDB renvoie les statuts en anglais, même en demandant le français.
+STATUTS = {
+    "Released": "Sorti",
+    "Post Production": "En post-production",
+    "In Production": "En production",
+    "Planned": "Prévu",
+    "Rumored": "Annoncé",
+    "Canceled": "Annulé",
+    "Returning Series": "En cours",
+    "Ended": "Terminée",
+    "Pilot": "Pilote",
+}
+
+
+def _image(path: str | None, size: str) -> str | None:
+    # « w342 » : largeur de 342 px, suffisante pour une affiche sur mobile.
+    return f"{IMAGE_URL}/{size}{path}" if path else None
+
+
+def _year(value: str | None) -> int | None:
+    parsed = parse_date(value)
+    return parsed.year if parsed else None
+
+
+class TmdbProvider:
+    source = Source.TMDB
+
+    def __init__(self, token: str) -> None:
+        self._headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+
+    async def _get(self, http: httpx.AsyncClient, path: str, **params: str) -> dict[str, Any]:
+        try:
+            response = await http.get(
+                f"{API_URL}{path}",
+                params={"language": "fr-FR", **params},
+                headers=self._headers,
+            )
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"TMDB injoignable : {exc}") from exc
+        if response.status_code == 404:
+            return {}
+        if response.status_code != 200:
+            raise ProviderError(f"TMDB a répondu {response.status_code}")
+        data: dict[str, Any] = response.json()
+        return data
+
+    async def search(self, http: httpx.AsyncClient, query: str) -> list[SearchResult]:
+        # « multi » cherche à la fois dans les films, les séries et les personnes.
+        data = await self._get(http, "/search/multi", query=query, include_adult="false")
+        results = []
+        for item in data.get("results", []):
+            media_type = item.get("media_type")
+            if media_type not in ("movie", "tv"):
+                continue  # on ignore les personnes (acteurs, réalisateurs)
+            is_movie = media_type == "movie"
+            results.append(
+                SearchResult(
+                    source=Source.TMDB,
+                    kind=ContentKind.MOVIE if is_movie else ContentKind.SERIES,
+                    external_id=str(item["id"]),
+                    title=item.get("title" if is_movie else "name") or "Sans titre",
+                    original_title=item.get("original_title" if is_movie else "original_name"),
+                    year=_year(item.get("release_date" if is_movie else "first_air_date")),
+                    poster_url=_image(item.get("poster_path"), "w342"),
+                    overview=item.get("overview") or None,
+                )
+            )
+        return results
+
+    async def get_detail(
+        self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
+    ) -> ContentDetail | None:
+        if kind == ContentKind.MOVIE:
+            data = await self._get(http, f"/movie/{external_id}")
+            return self._movie(data) if data else None
+        if kind == ContentKind.SERIES:
+            data = await self._get(http, f"/tv/{external_id}")
+            return self._series(data) if data else None
+        return None
+
+    def _movie(self, data: dict[str, Any]) -> ContentDetail:
+        return ContentDetail(
+            source=Source.TMDB,
+            kind=ContentKind.MOVIE,
+            external_id=str(data["id"]),
+            title=data.get("title") or "Sans titre",
+            original_title=data.get("original_title"),
+            year=_year(data.get("release_date")),
+            poster_url=_image(data.get("poster_path"), "w500"),
+            backdrop_url=_image(data.get("backdrop_path"), "w1280"),
+            overview=data.get("overview") or None,
+            genres=[genre["name"] for genre in data.get("genres", [])],
+            release_date=parse_date(data.get("release_date")),
+            runtime_minutes=data.get("runtime") or None,
+            status=STATUTS.get(data.get("status", ""), data.get("status")),
+            source_url=f"https://www.themoviedb.org/movie/{data['id']}",
+        )
+
+    def _series(self, data: dict[str, Any]) -> ContentDetail:
+        run_times = data.get("episode_run_time") or []
+        seasons = [
+            SeasonSummary(
+                number=season["season_number"],
+                name=season.get("name") or f"Saison {season['season_number']}",
+                episode_count=season.get("episode_count"),
+                air_date=parse_date(season.get("air_date")),
+                poster_url=_image(season.get("poster_path"), "w342"),
+            )
+            for season in data.get("seasons", [])
+        ]
+        return ContentDetail(
+            source=Source.TMDB,
+            kind=ContentKind.SERIES,
+            external_id=str(data["id"]),
+            title=data.get("name") or "Sans titre",
+            original_title=data.get("original_name"),
+            year=_year(data.get("first_air_date")),
+            poster_url=_image(data.get("poster_path"), "w500"),
+            backdrop_url=_image(data.get("backdrop_path"), "w1280"),
+            overview=data.get("overview") or None,
+            genres=[genre["name"] for genre in data.get("genres", [])],
+            release_date=parse_date(data.get("first_air_date")),
+            end_date=parse_date(data.get("last_air_date"))
+            if data.get("status") == "Ended"
+            else None,
+            runtime_minutes=run_times[0] if run_times else None,
+            status=STATUTS.get(data.get("status", ""), data.get("status")),
+            seasons_count=data.get("number_of_seasons"),
+            episodes_count=data.get("number_of_episodes"),
+            # La « saison 0 » regroupe les épisodes spéciaux : on la place à la fin.
+            seasons=sorted(seasons, key=lambda s: (s.number == 0, s.number)),
+            source_url=f"https://www.themoviedb.org/tv/{data['id']}",
+        )

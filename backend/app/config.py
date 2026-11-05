@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     # En production (HTTPS), le cookie ne doit jamais circuler en clair.
     cookie_secure: bool = False
 
+    # --- Sources de données externes ---
+    # Vide = TMDB désactivé (la recherche fonctionne alors avec AniList seul).
+    tmdb_api_token: str = ""
+    # Durées de mise en cache des réponses des API tierces, en secondes.
+    search_cache_seconds: int = 3600  # 1 h : les résultats bougent peu
+    detail_cache_seconds: int = 86400  # 24 h : une fiche change rarement
+
     @model_validator(mode="after")
     def _verifier_secrets(self) -> "Settings":
         if self.environment in ("staging", "production"):

@@ -4,8 +4,8 @@ Application web et mobile (PWA) de suivi de séries, animes, films, livres et
 jeux vidéo, avec bibliothèques personnalisées, gamification et cartes à
 collectionner.
 
-> **État actuel : étape 0, le socle.** L'application démarre, la base de données
-> et le cache répondent, la CI vérifie chaque modification.
+> **État actuel : étape 1b.** Comptes utilisateurs sécurisés, recherche unifiée de films,
+> séries et animes (TMDB, AniList) avec fiche détaillée et cache Redis.
 
 ---
 
@@ -36,6 +36,10 @@ Dans un terminal, depuis le dossier `supertracker` :
 cp .env.example .env
 docker compose up --build
 ```
+
+**Recherche de films et séries (facultatif)** : ajoutez votre jeton TMDB dans .env
+(`TMDB_API_TOKEN=eyJ…`, à obtenir gratuitement sur themoviedb.org → Paramètres → API →
+« Jeton d'accès en lecture »). Sans lui, la recherche fonctionne avec les animes AniList seuls.
 
 Le premier lancement prend quelques minutes (téléchargement des images). Ensuite :
 
