@@ -8,7 +8,12 @@ secret n'est donc écrit en dur dans le code.
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Valeur utilisable UNIQUEMENT en local : le démarrage est refusé si elle est
+# encore présente en recette ou en production (voir le validateur plus bas).
+DEV_JWT_SECRET = "dev-only-secret-a-changer-0123456789abcdef"  # noqa: S105 (volontaire)
 
 
 class Settings(BaseSettings):
@@ -21,6 +26,26 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "staging", "production"] = "development"
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/supertracker"
     redis_url: str = "redis://localhost:6379/0"
+
+    # --- Authentification ---
+    # Clé secrète qui signe les jetons d'accès. Qui la connaît peut fabriquer
+    # de faux jetons : elle doit rester secrète et longue (32 caractères min).
+    jwt_secret: str = DEV_JWT_SECRET
+    # Jeton d'accès court : s'il est volé, il ne sert que quelques minutes.
+    access_token_minutes: int = 15
+    # Jeton de renouvellement long : il évite de se reconnecter chaque jour.
+    refresh_token_days: int = 30
+    # En production (HTTPS), le cookie ne doit jamais circuler en clair.
+    cookie_secure: bool = False
+
+    @model_validator(mode="after")
+    def _verifier_secrets(self) -> "Settings":
+        if self.environment in ("staging", "production"):
+            if self.jwt_secret == DEV_JWT_SECRET or len(self.jwt_secret) < 32:
+                raise ValueError("JWT_SECRET doit être défini (32 caractères minimum).")
+            if not self.cookie_secure:
+                raise ValueError("COOKIE_SECURE doit valoir true hors développement.")
+        return self
 
 
 @lru_cache

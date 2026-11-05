@@ -29,6 +29,9 @@ markers = [
 
 [tool.coverage.run]
 source = ["app"]
+# SQLAlchemy asynchrone s'appuie sur des « greenlets » : il faut le signaler
+# à coverage, sinon le code exécuté à travers eux n'est pas comptabilisé.
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 show_missing = true
