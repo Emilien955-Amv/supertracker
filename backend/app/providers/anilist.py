@@ -72,6 +72,8 @@ query ($id: Int, $page: Int) {
 """
 
 # Rôles AniList → importance de la carte (le premier rôle principal devient le héros).
+# Ordre d'importance des rôles AniList (pour fusionner les saisons).
+ROLE_ORDER = {"MAIN": 0, "SUPPORTING": 1, "BACKGROUND": 2}
 ANILIST_ROLES = {
     "MAIN": CharacterRole.MAIN,
     "SUPPORTING": CharacterRole.SUPPORTING,
@@ -375,14 +377,33 @@ class AniListProvider:
     ) -> list[CharacterSummary]:
         if kind != ContentKind.ANIME or not external_id.isdigit():
             return []
-        # Le plus de personnages possible : jusqu'à 4 pages de 25.
-        edges: list[dict[str, Any]] = []
-        for page in range(1, MAX_CHARACTERS // 25 + 1):
-            data = await self._query(http, CHARACTERS_QUERY, {"id": int(external_id), "page": page})
-            block = ((data.get("Media") or {}).get("characters")) or {}
-            edges += block.get("edges") or []
-            if not (block.get("pageInfo") or {}).get("hasNextPage"):
+        # Toutes les saisons comptent : la saison 2 apporte ses nouveaux personnages.
+        first = (await self._query(http, SEASON_QUERY, {"id": int(external_id)})).get("Media")
+        media_ids = (
+            [m["id"] for m in await self._seasons(http, first)]
+            if first and first.get("id")
+            else [int(external_id)]
+        )
+        # Le plus de personnages possible : jusqu'à 12 pages de 25 par saison.
+        found: dict[str, tuple[int, int, int, dict[str, Any]]] = {}
+        position = 0
+        for season, media_id in enumerate(media_ids):
+            for page in range(1, MAX_CHARACTERS // 25 + 1):
+                data = await self._query(http, CHARACTERS_QUERY, {"id": media_id, "page": page})
+                block = ((data.get("Media") or {}).get("characters")) or {}
+                for edge in block.get("edges") or []:
+                    name = (((edge.get("node") or {}).get("name") or {}).get("full") or "").lower()
+                    rank = ROLE_ORDER.get(edge.get("role", ""), len(ROLE_ORDER))
+                    position += 1
+                    # Un personnage présent dans plusieurs saisons garde son meilleur rôle.
+                    if name and (name not in found or rank < found[name][0]):
+                        found[name] = (rank, season, position, edge)
+                if not (block.get("pageInfo") or {}).get("hasNextPage"):
+                    break
+            if len(found) >= MAX_CHARACTERS:
                 break
+        # Principaux de toutes les saisons d'abord, puis seconds rôles, puis figurants.
+        edges = [edge for *_, edge in sorted(found.values(), key=lambda f: f[:3])]
         characters: list[CharacterSummary] = []
         hero_given = False
         supporting = 0

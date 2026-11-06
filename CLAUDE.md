@@ -55,11 +55,14 @@ Les tests backend utilisent la base dédiée `supertracker_test` (créée une fo
 ## Feuille de route
 
 Fait : socle, comptes, recherche + où regarder, suivi + bibliothèques (meuble à
-étagères), XP/succès, cartes, profils et amis (3a).
+étagères), XP/succès, cartes, profils et amis (3a), catalogue resserré (100 séries,
+100 films dont sagas, 100 animes ; personnages de toutes les saisons, max 300),
+collections complètes (carte « Maître », titre, 500 XP, 5 boosters, succès),
+sondages (3 votes → l'œuvre entre au catalogue).
 
 À faire, dans l'ordre (décidé le 2026-11-06) :
 
-1. **Catalogue de cartes resserré** : 100 séries, 100 films (sagas regroupées :
+1. ✅ **Catalogue de cartes resserré** : 100 séries, 100 films (sagas regroupées :
    « Harry Potter » = une seule œuvre), 100 animes les plus populaires, avec le
    maximum de personnages (One Piece, Naruto… jusqu'à 300). Récompense quand une
    œuvre est complétée en cartes (décidé : les quatre à la fois) : carte « Maître »
