@@ -73,6 +73,18 @@ async def ouvrir(client: AsyncClient, theme: str = "mixed") -> dict[str, Any]:
     return result
 
 
+FILMS_DU_CATALOGUE = {"Matrix", "Pulp Fiction"}
+
+
+async def remplir_catalogue(contexte: Contexte) -> int:
+    """Catalogue de la fausse source : Matrix et Pulp Fiction (films), Frieren (anime)."""
+    return await card_catalog.seed_catalog(
+        contexte.session,
+        None,  # type: ignore[arg-type]  (la fausse source n'utilise pas le réseau)
+        [contexte.source],
+    )
+
+
 async def offrir_boosters(contexte: Contexte, nombre: int) -> None:
     for n in range(nombre):
         await gamification.grant_booster(contexte.session, contexte.alice.id, f"test:{n}")
@@ -95,26 +107,34 @@ async def test_booster_de_bienvenue_catalogue_vide(
 
 @pytest.mark.integration
 async def test_cartes_sans_avoir_vu_le_contenu(db_client: AsyncClient, contexte: Contexte) -> None:
-    # Alice ajoute Matrix à « À voir » : ses cartes rejoignent le catalogue commun.
-    await db_client.put(FILM, json={"status": "planned"})
-    await collection(db_client)
+    await remplir_catalogue(contexte)
 
-    # Bob n'a rien vu ni suivi : il obtient quand même des cartes Matrix.
+    # Bob n'a rien vu ni suivi : il obtient quand même des cartes du catalogue.
     contexte.connecter(contexte.bob)
     booster = await ouvrir(db_client, "movie")
     assert booster["theme"] == "movie"
     assert len(booster["cards"]) == 5
-    assert {c["card"]["content"]["title"] for c in booster["cards"]} == {"Matrix"}
-    # Aucun anime dans le catalogue : pack « Animes » indisponible.
+    assert {c["card"]["content"]["title"] for c in booster["cards"]} <= FILMS_DU_CATALOGUE
+    # Aucune œuvre Disney+ dans le catalogue : pack indisponible.
     await offrir_boosters(contexte, 1)
-    response = await db_client.post("/api/cards/boosters/open", json={"theme": "anime"})
+    response = await db_client.post("/api/cards/boosters/open", json={"theme": "disney"})
     assert response.status_code == 409
 
 
 @pytest.mark.integration
+async def test_suivre_une_oeuvre_ne_l_ajoute_pas_au_catalogue(
+    db_client: AsyncClient, contexte: Contexte
+) -> None:
+    # Game of Thrones n'est pas dans le classement de la fausse source.
+    await db_client.put(SERIE, json={"status": "watching"})
+    await remplir_catalogue(contexte)
+    response = await db_client.post("/api/cards/boosters/open", json={"theme": "series"})
+    assert response.status_code == 409  # pas de série dans le catalogue
+
+
+@pytest.mark.integration
 async def test_doublons_en_fragments(db_client: AsyncClient, contexte: Contexte) -> None:
-    await db_client.put(FILM, json={"status": "watching"})
-    await collection(db_client)
+    await remplir_catalogue(contexte)
     await offrir_boosters(contexte, 2)
 
     fragments = 0
@@ -124,7 +144,7 @@ async def test_doublons_en_fragments(db_client: AsyncClient, contexte: Contexte)
             if not tirage["is_new"]:
                 assert tirage["fragments"] > 0
                 fragments += tirage["fragments"]
-    # 15 cartes tirées parmi 5 cartes Matrix : forcément des doublons.
+    # 15 cartes tirées parmi 10 cartes de films : forcément des doublons.
     assert fragments > 0
     assert (await collection(db_client))["fragments"] == fragments
 
@@ -133,11 +153,13 @@ async def test_doublons_en_fragments(db_client: AsyncClient, contexte: Contexte)
 async def test_vos_contenus_ont_deux_fois_plus_de_chances(
     db_client: AsyncClient, contexte: Contexte
 ) -> None:
-    await db_client.put(FILM, json={"status": "watching"})
-    await collection(db_client)
+    await remplir_catalogue(contexte)
+    await db_client.put(FILM, json={"status": "watching"})  # Alice suit Matrix
     alice = await cards.available_pool(contexte.session, contexte.alice.id, PackTheme.MOVIE)
     bob = await cards.available_pool(contexte.session, contexte.bob.id, PackTheme.MOVIE)
-    assert len(alice) == 2 * len(bob) > 0
+    # Les 5 cartes de Matrix comptent double pour Alice.
+    assert len(bob) == 10
+    assert len(alice) == len(bob) + 5
 
 
 @pytest.mark.integration
@@ -184,15 +206,16 @@ async def test_un_booster_par_oeuvre_terminee(db_client: AsyncClient, contexte: 
 
 @pytest.mark.integration
 async def test_fabriquer_une_carte(db_client: AsyncClient, contexte: Contexte) -> None:
-    await db_client.put(FILM, json={"status": "watching"})
+    await remplir_catalogue(contexte)
+    await db_client.put(FILM, json={"status": "watching"})  # Matrix dans le classeur
     await ouvrir(db_client, "movie")
     classeur = (await db_client.get("/api/cards/binder")).json()
-    assert [(p["content"]["title"], p["total"]) for p in classeur] == [("Matrix", 5)]
-    assert 1 <= classeur[0]["owned"] <= 5
-    page = (await db_client.get(f"/api/cards/binder/{classeur[0]['content']['id']}")).json()
+    matrix = next(p for p in classeur if p["content"]["title"] == "Matrix")
+    assert matrix["total"] == 5
+    page = (await db_client.get(f"/api/cards/binder/{matrix['content']['id']}")).json()
     cartes = page["cards"]
     assert cartes[0]["rarity"] == "divine"  # de la plus rare à la plus commune
-    assert sum(c["owned"] for c in cartes) == classeur[0]["owned"]
+    assert sum(c["owned"] for c in cartes) == matrix["owned"]
     divine = next(c for c in cartes if c["rarity"] == "divine")
     # Sous le nom : l'importance du personnage, jamais l'acteur ni le doubleur.
     assert (divine["title"], divine["subtitle"]) == ("Neo (603)", "Héros")
@@ -224,28 +247,53 @@ async def test_fabriquer_une_carte(db_client: AsyncClient, contexte: Contexte) -
 async def test_catalogue_des_contenus_populaires(
     db_client: AsyncClient, contexte: Contexte
 ) -> None:
-    traites = await card_catalog.seed_catalog(
-        contexte.session,
-        None,  # type: ignore[arg-type]  (la fausse source n'utilise pas le réseau)
-        [contexte.source],
-    )
+    assert await remplir_catalogue(contexte) == 3  # Matrix, Pulp Fiction, Frieren
 
-    assert traites == 2  # Pulp Fiction et Frieren
-    # Personne ne suit Pulp Fiction, et pourtant ses cartes sont tirables.
+    # Personne ne suit ces œuvres, et pourtant leurs cartes sont tirables.
     booster = await ouvrir(db_client, "movie")
-    assert {c["card"]["content"]["title"] for c in booster["cards"]} == {"Pulp Fiction"}
+    assert {c["card"]["content"]["title"] for c in booster["cards"]} <= FILMS_DU_CATALOGUE
     # Uniquement des personnages : ni affiche ni décor.
     assert {c["card"]["kind"] for c in booster["cards"]} == {"character"}
 
 
 @pytest.mark.integration
+async def test_les_films_d_une_saga_sont_regroupes(
+    db_client: AsyncClient, contexte: Contexte
+) -> None:
+    from app.providers.base import ContentDetail, ContentKind, SearchResult, Source
+
+    # Matrix et Pulp Fiction appartiennent (pour le test) à la même saga.
+    contexte.source.sagas = {"603": ("77", "Saga test"), "680": ("77", "Saga test")}
+    parties = [
+        SearchResult(source=Source.TMDB, kind=ContentKind.MOVIE, external_id=i, title=t)
+        for i, t in (("603", "Matrix"), ("680", "Pulp Fiction"))
+    ]
+    fiche_normale = contexte.source.get_detail
+
+    async def fiche(http, kind, external_id):  # type: ignore[no-untyped-def]
+        if kind == ContentKind.SAGA:
+            return ContentDetail(
+                source=Source.TMDB,
+                kind=ContentKind.SAGA,
+                external_id=external_id,
+                title="Saga test",
+                source_url="https://exemple.fr/saga",
+                parts=parties,
+            )
+        return await fiche_normale(http, kind, external_id)
+
+    contexte.source.get_detail = fiche  # type: ignore[method-assign]
+
+    # Une seule œuvre pour les deux films (plus Frieren côté animes).
+    assert await remplir_catalogue(contexte) == 2
+    booster = await ouvrir(db_client, "movie")
+    assert {c["card"]["content"]["title"] for c in booster["cards"]} == {"Saga test"}
+    assert {c["card"]["content"]["kind"] for c in booster["cards"]} == {"saga"}
+
+
+@pytest.mark.integration
 async def test_packs_par_plateforme(db_client: AsyncClient, contexte: Contexte) -> None:
-    await db_client.put(FILM, json={"status": "watching"})  # Matrix : sur aucune plateforme
-    await card_catalog.seed_catalog(
-        contexte.session,
-        None,  # type: ignore[arg-type]  (la fausse source n'utilise pas le réseau)
-        [contexte.source],
-    )
+    await remplir_catalogue(contexte)  # Matrix : sur aucune plateforme
     moi = await collection(db_client)
     packs = {theme["theme"]: theme["cards"] for theme in moi["themes"]}
     assert packs["netflix"] == 5  # les 5 personnages
@@ -325,8 +373,7 @@ async def test_rattrapage_des_oeuvres_deja_terminees(
 async def test_ouvrir_plusieurs_boosters_d_un_coup(
     db_client: AsyncClient, contexte: Contexte
 ) -> None:
-    await db_client.put(FILM, json={"status": "watching"})
-    await collection(db_client)
+    await remplir_catalogue(contexte)
     await offrir_boosters(contexte, 3)  # 4 boosters avec celui de bienvenue
 
     response = await db_client.post(

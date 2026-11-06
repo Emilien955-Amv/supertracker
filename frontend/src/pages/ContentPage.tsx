@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 
 import { Attribution } from "../components/Attribution";
 import { LibraryPicker } from "../components/LibraryPicker";
@@ -8,7 +8,7 @@ import { SeasonsTracker } from "../components/SeasonsTracker";
 import { TrackingPanel } from "../components/TrackingPanel";
 import { WatchProviders } from "../components/WatchProviders";
 import { ApiError } from "../lib/api";
-import { KIND_LABELS, SOURCE_LABELS, formatDate, formatRuntime } from "../lib/catalog";
+import { KIND_LABELS, SOURCE_LABELS, contentPath, formatDate, formatRuntime } from "../lib/catalog";
 import type { ContentDetail, ContentKind, Source } from "../lib/catalog";
 import { trackingPath } from "../lib/tracking";
 import type { ContentState } from "../lib/tracking";
@@ -105,7 +105,29 @@ export default function ContentPage() {
           </div>
         </div>
 
-        {tracking.status === "success" && (
+        {content.kind === "saga" && content.parts && content.parts.length > 0 && (
+          <section aria-labelledby="films-saga" className="mt-6">
+            <h2 id="films-saga" className="text-lg font-semibold">
+              Les {content.parts.length} films de la saga
+            </h2>
+            <ul className="mt-3 grid grid-cols-3 gap-3 sm:grid-cols-5">
+              {content.parts.map((part) => (
+                <li key={part.external_id}>
+                  <Link to={contentPath(part)} className="block">
+                    <Poster url={part.poster_url} title={part.title} />
+                    <p className="mt-1 line-clamp-2 text-xs">{part.title}</p>
+                    {part.year && <p className="text-[11px] text-muted">{part.year}</p>}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-muted">
+              Suivez chaque film depuis sa propre fiche. Les cartes, elles, regroupent toute la saga.
+            </p>
+          </section>
+        )}
+
+        {tracking.status === "success" && content.kind !== "saga" && (
           <>
             <TrackingPanel
               path={apiPath}

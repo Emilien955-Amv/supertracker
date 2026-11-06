@@ -55,6 +55,10 @@ class Content(Base):
     refreshed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # Œuvre du catalogue de cartes (les 100 séries, films et animes les plus
+    # populaires, plus celles demandées par les joueurs) et son rang.
+    in_card_catalog: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    catalog_rank: Mapped[int | None] = mapped_column(Integer)
     # Date de création des cartes de ce contenu (None : pas encore créées).
     cards_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -62,8 +62,10 @@ Fait : socle, comptes, recherche + où regarder, suivi + bibliothèques (meuble 
 1. **Catalogue de cartes resserré** : 100 séries, 100 films (sagas regroupées :
    « Harry Potter » = une seule œuvre), 100 animes les plus populaires, avec le
    maximum de personnages (One Piece, Naruto… jusqu'à 300). Récompense quand une
-   œuvre est complétée en cartes. **Sondages** : les utilisateurs demandent et
-   votent pour les œuvres à ajouter.
+   œuvre est complétée en cartes (décidé : les quatre à la fois) : carte « Maître »
+   dorée unique à l'œuvre, titre de profil (ex. « Roi des pirates »), boosters +
+   XP bonus, succès spécial. **Sondages** : les utilisateurs demandent et votent
+   pour les œuvres à ajouter au catalogue.
 2. **Échange de cartes** (3b) : garder ses doublons, les recycler en fragments à
    la demande, proposer des échanges entre amis.
 3. **Accueil personnalisé** : suggestions du jour selon les goûts (changent chaque

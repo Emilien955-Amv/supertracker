@@ -1,7 +1,8 @@
 /** Types du catalogue : miroir des modèles du backend (app/providers/base.py). */
 
 export type Source = "tmdb" | "anilist";
-export type ContentKind = "movie" | "series" | "anime";
+/** « saga » : films regroupés (ex. Harry Potter = les 8 films). */
+export type ContentKind = "movie" | "series" | "anime" | "saga";
 
 export type SearchResult = {
   source: Source;
@@ -53,12 +54,15 @@ export type ContentDetail = SearchResult & {
   seasons: SeasonSummary[];
   source_url: string;
   watch: WatchAvailability | null;
+  /** Saga : ses films, dans l'ordre de sortie. */
+  parts?: SearchResult[];
 };
 
 export const KIND_LABELS: Record<ContentKind, string> = {
   movie: "Film",
   series: "Série",
   anime: "Anime",
+  saga: "Saga",
 };
 
 export const SOURCE_LABELS: Record<Source, string> = {

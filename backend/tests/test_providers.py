@@ -512,3 +512,48 @@ async def test_tmdb_ignore_les_animes_japonais() -> None:
     async with faux_client(lambda _: httpx.Response(200, json=anime)) as http:
         persos = await TmdbProvider("jeton").get_characters(http, ContentKind.SERIES, "37854")
     assert persos == []  # pas de photos de doubleurs : les cartes viennent d'AniList
+
+
+async def test_tmdb_personnages_d_une_saga() -> None:
+    saga = {
+        "id": 1241,
+        "name": "Harry Potter - Saga",
+        "parts": [
+            {"id": 671, "title": "Harry Potter 1", "release_date": "2001-11-16"},
+            {"id": 672, "title": "Harry Potter 2", "release_date": "2002-11-13"},
+            {"id": 999, "title": "Pas encore sorti"},  # sans date : ignoré
+        ],
+    }
+
+    def casting(*roles: tuple[int, str]) -> dict[str, object]:
+        return {
+            "genres": [],
+            "credits": {
+                "cast": [
+                    {"order": o, "character": c, "profile_path": f"/{o}.jpg"} for o, c in roles
+                ]
+            },
+        }
+
+    films = {
+        "/3/movie/671": casting(
+            (0, "Harry Potter"), (1, "Ron Weasley"), (2, "Mangemort"), (3, "Mangemort")
+        ),
+        "/3/movie/672": casting((0, "Harry Potter"), (1, "Gilderoy Lockhart"), (2, "Ron Weasley")),
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/3/collection/1241":
+            return httpx.Response(200, json=saga)
+        return httpx.Response(200, json=films[request.url.path])
+
+    async with faux_client(handler) as http:
+        fiche = await TmdbProvider("jeton").get_detail(http, ContentKind.SAGA, "1241")
+        persos = await TmdbProvider("jeton").get_characters(http, ContentKind.SAGA, "1241")
+
+    assert fiche is not None
+    assert fiche.title == "Harry Potter"  # « - Saga » retiré
+    assert [p.external_id for p in fiche.parts] == ["671", "672"]
+    # Présents dans les 2 films d'abord ; « Mangemort » (plusieurs acteurs) écarté.
+    assert [p.name for p in persos] == ["Harry Potter", "Ron Weasley", "Gilderoy Lockhart"]
+    assert persos[0].role == CharacterRole.HERO

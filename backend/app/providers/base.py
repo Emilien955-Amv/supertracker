@@ -22,6 +22,7 @@ class ContentKind(StrEnum):
     MOVIE = "movie"
     SERIES = "series"
     ANIME = "anime"
+    SAGA = "saga"  # films regroupés (ex. « Harry Potter » = les 8 films)
 
 
 class SearchResult(BaseModel):
@@ -104,6 +105,8 @@ class ContentDetail(SearchResult):
     is_finished: bool = False
     # Sites de streaming signalés par la source (ex. « Crunchyroll », « Netflix »).
     streaming_sites: list[str] = []
+    # Saga : les films qui la composent, dans l'ordre de sortie.
+    parts: list[SearchResult] = []
     # None : la source ne fournit pas cette information (ex. AniList).
     watch: WatchAvailability | None = None
 

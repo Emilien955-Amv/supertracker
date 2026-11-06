@@ -63,10 +63,14 @@ PLATFORM_PAGES = 5  # titres populaires par plateforme (Netflix, Disney+…)
 ANIMATION_GENRE = 16  # identifiant du genre « Animation » chez TMDB
 
 VOICE_ROLE = re.compile(r"\((?:voice|voix)\)", re.IGNORECASE)
-UNCREDITED = re.compile(r"\s*\((?:uncredited|non crédité)\)", re.IGNORECASE)
+# Mentions de générique entre parenthèses : « (uncredited) », « (performer) »…
+UNCREDITED = re.compile(r"\s*\([^)]*\)\s*$")
 
 # Le plus de personnages possible (au-delà de 100, ce sont des figurants).
 MAX_CHARACTERS = 100
+MAX_SAGA_PARTS = 12  # films d'une saga pris en compte pour ses personnages
+TOP_PAGES = 10  # classement « plus populaires » : jusqu'à 200 candidats
+SAGA_SUFFIX = re.compile(r"\s*[-–:]\s*(saga|collection)\s*$|\s+(saga|collection)$", re.IGNORECASE)
 
 
 def _role_from_order(order: int) -> CharacterRole:
@@ -145,7 +149,31 @@ class TmdbProvider:
         if kind == ContentKind.SERIES:
             data = await self._get(http, f"/tv/{external_id}", **extra)
             return self._series(data) if data else None
+        if kind == ContentKind.SAGA:
+            data = await self._get(http, f"/collection/{external_id}")
+            return self._saga(data) if data else None
         return None
+
+    def _saga(self, data: dict[str, Any]) -> ContentDetail:
+        parts = sorted(
+            (p for p in data.get("parts", []) if p.get("release_date")),
+            key=lambda p: p["release_date"],
+        )
+        years = [y for y in (_year(p.get("release_date")) for p in parts) if y]
+        return ContentDetail(
+            source=Source.TMDB,
+            kind=ContentKind.SAGA,
+            external_id=str(data["id"]),
+            # « Harry Potter - Saga » → « Harry Potter »
+            title=SAGA_SUFFIX.sub("", data.get("name") or "Sans titre").strip(),
+            year=min(years) if years else None,
+            poster_url=_image(data.get("poster_path"), "w500"),
+            backdrop_url=_image(data.get("backdrop_path"), "w1280"),
+            overview=data.get("overview") or None,
+            source_url=f"https://www.themoviedb.org/collection/{data['id']}",
+            is_finished=True,
+            parts=[self._summary(p, ContentKind.MOVIE) for p in parts],
+        )
 
     async def get_season(
         self, http: httpx.AsyncClient, external_id: str, season_number: int
@@ -167,9 +195,75 @@ class TmdbProvider:
             if isinstance(episode.get("episode_number"), int)
         ]
 
+    async def _saga_characters(
+        self, http: httpx.AsyncClient, external_id: str
+    ) -> list[CharacterSummary]:
+        """Personnages de tous les films d'une saga, fusionnés.
+
+        Classement : d'abord ceux qui apparaissent dans le plus de films, puis
+        selon leur importance moyenne (Harry, Ron, Hermione en tête).
+        """
+        data = await self._get(http, f"/collection/{external_id}")
+        parts = [p for p in (self._saga(data).parts if data else [])][:MAX_SAGA_PARTS]
+        merged: dict[str, dict[str, Any]] = {}
+        generic: set[str] = set()
+        for part in parts:
+            in_film: dict[str, CharacterSummary] = {}
+            for character in await self.get_characters(http, ContentKind.MOVIE, part.external_id):
+                key = disney.normalize(character.name)
+                # Nom tenu par plusieurs acteurs dans un même film (« Mangemort »,
+                # « Stormtrooper ») : un rôle de figurant, pas un vrai personnage.
+                if key in in_film:
+                    generic.add(key)
+                else:
+                    in_film[key] = character
+            for key, character in in_film.items():  # compté une seule fois par film
+                entry = merged.setdefault(key, {"character": character, "films": 0, "orders": []})
+                entry["films"] += 1
+                entry["orders"].append(character.order)
+        ranked = sorted(
+            (entry for key, entry in merged.items() if key not in generic),
+            key=lambda e: (-e["films"], sum(e["orders"]) / len(e["orders"])),
+        )[:MAX_CHARACTERS]
+        return [
+            CharacterSummary(
+                name=e["character"].name,
+                image_url=e["character"].image_url,
+                role=_role_from_order(order),
+                order=order,
+            )
+            for order, e in enumerate(ranked)
+        ]
+
+    async def get_top(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
+        """Les films ou séries les plus populaires de tous les temps (les plus notés).
+
+        Plus stable que « populaires du moment » : les grands classiques restent.
+        Talk-shows, informations et téléréalité sont exclus (pas de personnages).
+        """
+        if kind not in (ContentKind.MOVIE, ContentKind.SERIES):
+            return []
+        media = "movie" if kind == ContentKind.MOVIE else "tv"
+        extra = {} if kind == ContentKind.MOVIE else {"without_genres": "10763,10764,10767"}
+        return await self._list(
+            http, kind, f"/discover/{media}", TOP_PAGES, False, sort_by="vote_count.desc", **extra
+        )
+
+    async def movie_collection(
+        self, http: httpx.AsyncClient, movie_id: str
+    ) -> tuple[str, str] | None:
+        """Saga dont fait partie un film (identifiant, nom), ou None."""
+        data = await self._get(http, f"/movie/{movie_id}")
+        collection = data.get("belongs_to_collection") or None
+        if not collection:
+            return None
+        return str(collection["id"]), collection.get("name") or ""
+
     async def get_characters(
         self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
     ) -> list[CharacterSummary]:
+        if kind == ContentKind.SAGA:
+            return await self._saga_characters(http, external_id)
         # Fiche + casting en un seul appel. Pour une série, « aggregate_credits »
         # regroupe toutes les saisons.
         if kind == ContentKind.MOVIE:

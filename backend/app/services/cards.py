@@ -190,7 +190,7 @@ ANILIST_SITES = {
 PLATFORM_THEMES = [*PLATFORM_IDS, *ANIME_PLATFORM_IDS]
 THEME_KINDS = {
     PackTheme.ANIME: [ContentKind.ANIME],
-    PackTheme.MOVIE: [ContentKind.MOVIE],
+    PackTheme.MOVIE: [ContentKind.MOVIE, ContentKind.SAGA],
     PackTheme.SERIES: [ContentKind.SERIES],
     PackTheme.MIXED: list(ContentKind),
     **{platform: list(ContentKind) for platform in PLATFORM_IDS},
@@ -419,8 +419,9 @@ async def timer_status(session: AsyncSession, user_id: int) -> int | None:
 
 
 def _in_theme[Q: Select[Any]](query: Q, theme: PackTheme) -> Q:
-    """Restreint une requête (qui joint déjà Content) aux cartes d'un pack."""
-    query = query.where(Content.kind.in_(THEME_KINDS[theme]))
+    """Restreint une requête (qui joint déjà Content) aux cartes d'un pack :
+    œuvres du catalogue de cartes, du bon type ou de la bonne plateforme."""
+    query = query.where(Content.in_card_catalog.is_(True), Content.kind.in_(THEME_KINDS[theme]))
     if theme in PLATFORM_THEMES:
         query = query.where(
             Card.content_id.in_(
@@ -518,8 +519,6 @@ async def open_booster(
     )
     if first is None:
         raise NoBoosterError
-    # Les appels aux sources se font AVANT de verrouiller quoi que ce soit.
-    await refresh_cards(session, http, providers, user_id)
     pool = await available_pool(session, user_id, theme)
     if not pool:
         raise EmptyPoolError  # le booster n'est pas consommé
@@ -648,10 +647,16 @@ async def catalog_stats(
     session: AsyncSession, user_id: int
 ) -> tuple[dict[Rarity, int], dict[Rarity, int], dict[PackTheme, int]]:
     """Cartes possédées et existantes par rareté, et nombre de cartes par thème."""
+    in_catalog = Content.in_card_catalog.is_(True)
     totals = {
         Rarity(rarity): count
         for rarity, count in (
-            await session.execute(select(Card.rarity, func.count()).group_by(Card.rarity))
+            await session.execute(
+                select(Card.rarity, func.count())
+                .join(Content, Content.id == Card.content_id)
+                .where(in_catalog)
+                .group_by(Card.rarity)
+            )
         ).tuples()
     }
     owned = {
@@ -672,6 +677,7 @@ async def catalog_stats(
                 select(Content.kind, func.count())
                 .select_from(Card)
                 .join(Content, Content.id == Card.content_id)
+                .where(in_catalog)
                 .group_by(Content.kind)
             )
         ).tuples()
@@ -683,6 +689,8 @@ async def catalog_stats(
                 select(ContentPlatform.platform, func.count())
                 .select_from(Card)
                 .join(ContentPlatform, ContentPlatform.content_id == Card.content_id)
+                .join(Content, Content.id == Card.content_id)
+                .where(in_catalog)
                 .group_by(ContentPlatform.platform)
             )
         ).tuples()

@@ -34,8 +34,6 @@ async def my_collection(
     user: CurrentUser, session: SessionDep, http: HttpDep, providers: ProvidersDep
 ) -> CollectionRead:
     await service.sync_boosters(session, user.id)  # bienvenue, niveaux, minuteur
-    # Vos contenus suivis rejoignent le catalogue de cartes.
-    await service.refresh_cards(session, http, providers, user.id)
     wallet = await service.wallet_state(session, user.id)
     owned, totals, themes = await service.catalog_stats(session, user.id)
     total_weight = sum(service.WEIGHTS.values())

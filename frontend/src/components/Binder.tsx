@@ -32,6 +32,12 @@ function normalize(text: string): string {
     .toLowerCase();
 }
 
+/** Le filtre « Films » inclut les sagas (Harry Potter, Star Wars…). */
+function matchesKind(kind: ContentKind, filter: KindFilter): boolean {
+  if (filter === "all") return true;
+  return filter === "movie" ? kind === "movie" || kind === "saga" : kind === filter;
+}
+
 /** Classeur : une pochette par œuvre, filtrable par catégorie et par nom. */
 export function Binder() {
   const state = useApi<BinderEntry[]>("/api/cards/binder");
@@ -53,14 +59,14 @@ export function Binder() {
   const entries = state.data;
   const needle = normalize(search.trim());
   const visible = entries
-    .filter((e) => kind === "all" || e.content.kind === kind)
+    .filter((e) => matchesKind(e.content.kind, kind))
     .filter((e) => !needle || normalize(e.content.title).includes(needle))
     .sort((a, b) => {
       if (sort === "complete") return b.owned / b.total - a.owned / a.total;
       if (sort === "owned") return b.owned - a.owned;
       return 0; // déjà triées de A à Z par le serveur
     });
-  const count = (k: KindFilter) => entries.filter((e) => k === "all" || e.content.kind === k).length;
+  const count = (k: KindFilter) => entries.filter((e) => matchesKind(e.content.kind, k)).length;
 
   return (
     <section aria-labelledby="classeur" className="mt-8">

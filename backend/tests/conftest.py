@@ -104,6 +104,8 @@ class FausseSource:
     def __init__(self) -> None:
         self.en_panne = False
         self.appels = 0
+        # Film → (saga, nom) : vide par défaut.
+        self.sagas: dict[str, tuple[str, str]] = {}
 
     async def search(self, http: httpx.AsyncClient, query: str) -> list[SearchResult]:
         return []
@@ -187,6 +189,20 @@ class FausseSource:
         if anime or provider_id != 8 or kind != ContentKind.MOVIE:
             return []
         return await self.get_popular(http, kind)
+
+    async def get_top(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
+        """Films les plus populaires : Matrix puis Pulp Fiction (pas de série)."""
+        if kind != ContentKind.MOVIE:
+            return []
+        matrix = await self.get_detail(http, ContentKind.MOVIE, "603")
+        assert matrix is not None  # noqa: S101
+        return [matrix, *await self.get_popular(http, kind)]
+
+    async def movie_collection(
+        self, http: httpx.AsyncClient, movie_id: str
+    ) -> tuple[str, str] | None:
+        """Aucune saga par défaut (un test peut le changer)."""
+        return self.sagas.get(movie_id)
 
     async def get_characters(
         self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
