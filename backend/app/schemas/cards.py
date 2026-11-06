@@ -95,3 +95,19 @@ class BoosterOpened(BaseModel):
 class CraftResult(BaseModel):
     card: CardRead
     fragments: int
+
+
+class RarityCount(BaseModel):
+    rarity: Rarity
+    count: int
+
+
+class PackContents(BaseModel):
+    """Liste des cartes qu'on peut obtenir dans un pack (paginée)."""
+
+    theme: PackTheme
+    label: str
+    total: int
+    matching: int
+    rarities: list[RarityCount]
+    cards: list[CollectionCard]

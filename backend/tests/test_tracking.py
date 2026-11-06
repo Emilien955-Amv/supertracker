@@ -149,3 +149,37 @@ async def test_retirer_du_suivi_oublie_les_episodes(
     assert etat["tracking"] is None
     assert etat["progress"]["watched"] == 0
     assert not any(e["watched"] for e in await episodes(db_client, 1))
+
+
+async def test_vu_jusqu_ici_coche_aussi_les_saisons_precedentes(
+    db_client: AsyncClient, contexte: Contexte
+) -> None:
+    # La saison 1 n'a jamais été ouverte : elle est chargée automatiquement.
+    reponse = await db_client.post(
+        f"{SERIE}/watched-until", json={"season_number": 2, "episode_number": 1, "watched": True}
+    )
+    assert reponse.status_code == 200
+    etat = reponse.json()
+    assert len(etat["changed_episode_ids"]) == 3  # S1É1, S1É2, S2É1 (pas l'épisode spécial)
+    assert etat["progress"]["watched"] == 3
+    assert all(e["watched"] for e in await episodes(db_client, 1))
+    assert not any(e["watched"] for e in await episodes(db_client, 0))
+
+    # « Pas vu à partir d'ici » depuis S1É2 : décoche S1É2 et toute la saison 2.
+    etat = (
+        await db_client.post(
+            f"{SERIE}/watched-until",
+            json={"season_number": 1, "episode_number": 2, "watched": False},
+        )
+    ).json()
+    assert len(etat["changed_episode_ids"]) == 2
+    assert etat["progress"]["watched"] == 1
+
+    # Annuler (on erreur) : on recoche exactement les épisodes modifiés.
+    etat = await cocher(db_client, etat["changed_episode_ids"])
+    assert etat["progress"]["watched"] == 3
+
+
+async def test_vu_jusqu_ici_refuse_pour_un_film(db_client: AsyncClient, contexte: Contexte) -> None:
+    corps = {"season_number": 1, "episode_number": 1, "watched": True}
+    assert (await db_client.post(f"{FILM}/watched-until", json=corps)).status_code == 404

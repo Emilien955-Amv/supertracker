@@ -128,6 +128,64 @@ describe("Suivi depuis la fiche", () => {
   });
 });
 
+describe("Vu jusqu'ici et annulation", () => {
+  it("coche jusqu'à un épisode puis annule", async () => {
+    const episodes = [1, 2].map((n) => ({
+      id: 100 + n,
+      season_number: 1,
+      number: n,
+      title: `Épisode ${n}`,
+      air_date: "2011-04-17",
+      runtime_minutes: 60,
+      still_url: null,
+      watched: false,
+    }));
+    const fetchMock = mockFetch({
+      ...CONNECTE,
+      "GET /api/catalog/tmdb/series/1399": { status: 200, body: FICHE_SERIE },
+      [`GET ${SUIVI}`]: { status: 200, body: PAS_SUIVI },
+      [`GET ${SUIVI}/seasons/1`]: { status: 200, body: episodes },
+      [`POST ${SUIVI}/watched-until`]: {
+        status: 200,
+        body: {
+          content_id: 7,
+          tracking: TRACKING,
+          progress: { watched: 2, total: 2, percent: 100 },
+          changed_episode_ids: [101, 102],
+        },
+      },
+      [`POST ${SUIVI}/episodes`]: {
+        status: 200,
+        body: { content_id: 7, tracking: TRACKING, progress: { watched: 0, total: 2, percent: 0 } },
+      },
+    });
+    afficher("/contenu/tmdb/series/1399");
+
+    const saison = (await screen.findByText("Saison 1", { selector: "p" })).closest("details")!;
+    saison.open = true;
+    fireEvent(saison, new Event("toggle"));
+    // Pas de « Vu jusqu'ici » sur le tout premier épisode : rien avant lui.
+    const boutons = await within(saison).findAllByRole("button", { name: /jusqu'à la saison 1/ });
+    expect(boutons).toHaveLength(1);
+    fireEvent.click(boutons[0]);
+
+    expect(corpsEnvoye(fetchMock, "POST", `${SUIVI}/watched-until`)).toEqual({
+      season_number: 1,
+      episode_number: 2,
+      watched: true,
+    });
+    expect(await screen.findByText(/2 épisodes marqués comme vus/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+    await waitFor(() =>
+      expect(corpsEnvoye(fetchMock, "POST", `${SUIVI}/episodes`)).toEqual({
+        episode_ids: [101, 102],
+        watched: false,
+      }),
+    );
+  });
+});
+
 describe("Mon suivi", () => {
   it("liste les contenus suivis avec leur progression", async () => {
     mockFetch({

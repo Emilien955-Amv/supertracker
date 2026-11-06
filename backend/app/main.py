@@ -6,7 +6,7 @@ domaine servira le site (/) et l'API (/api), sans configuration CORS.
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import structlog
 from fastapi import FastAPI
@@ -33,6 +33,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     yield
     if task is not None:
         task.cancel()
+        # On attend la fin de la tâche : elle libère ainsi son verrou Redis.
+        with suppress(asyncio.CancelledError):
+            await task
     # Arrêt propre : on libère les connexions ouvertes.
     await close_http_client()
     await redis_client.aclose()

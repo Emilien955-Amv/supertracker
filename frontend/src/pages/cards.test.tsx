@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -45,6 +45,8 @@ const COLLECTION = {
     { theme: "movie", label: "Films", cards: 689 },
     { theme: "series", label: "Séries", cards: 85 },
     { theme: "mixed", label: "Mélange", cards: 774 },
+    { theme: "netflix", label: "Netflix", cards: 320 },
+    { theme: "disney", label: "Disney+", cards: 0 },
   ],
   stats: [
     { rarity: "common", owned: 1, total: 1, chance_percent: 50 },
@@ -76,8 +78,14 @@ describe("Cartes", () => {
     expect(await screen.findByText("🎁 1 booster à ouvrir")).toBeTruthy();
     expect(screen.getByText("2:05")).toBeTruthy(); // prochain booster gratuit
     // Pack sans cartes (catalogue en préparation) : désactivé.
-    const anime = screen.getByRole("button", { name: /Animes & mangas/ }) as HTMLButtonElement;
+    const anime = screen.getByRole("button", { name: "Ouvrir un pack Animes & mangas" }) as HTMLButtonElement;
     expect(anime.disabled).toBe(true);
+    // Packs par plateforme.
+    expect((screen.getByRole("button", { name: "Ouvrir un pack Netflix" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Ouvrir un pack Disney+" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("link", { name: "Voir les cartes du pack Netflix" }).getAttribute("href")).toBe(
+      "/cartes/pack/netflix",
+    );
     // Divine : impossible à fabriquer, aucun bouton.
     expect(screen.queryByRole("button", { name: /Fabriquer une carte Divine/ })).toBeNull();
     // 30 fragments : la Rare (25) est fabricable, pas l'Épique (75).
@@ -87,7 +95,7 @@ describe("Cartes", () => {
     expect(epique.disabled).toBe(true);
   });
 
-  it("ouvre un booster et révèle les cartes", async () => {
+  it("révèle la dernière carte Légendaire avec suspense", async () => {
     mockFetch({
       ...CONNECTE,
       "GET /api/cards/me": { status: 200, body: COLLECTION },
@@ -96,8 +104,8 @@ describe("Cartes", () => {
         body: {
           theme: "movie",
           cards: [
+            ...[1, 1, 1, 1].map((id) => ({ card: carte(id, "common", "Figurant"), is_new: false, fragments: 1 })),
             { card: carte(5, "legendary", "Neo"), is_new: true, fragments: 0 },
-            ...[1, 1, 1, 1].map((id) => ({ card: carte(id, "common", "Affiche"), is_new: false, fragments: 1 })),
           ],
           fragments: 34,
           boosters_left: 0,
@@ -106,16 +114,27 @@ describe("Cartes", () => {
     });
     afficher();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Films/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ouvrir un pack Films" }));
 
     const fenetre = await screen.findByRole("dialog", { name: /Votre booster/ });
     fireEvent.click(within(fenetre).getByRole("button", { name: "Retourner la carte 1" }));
-    expect(within(fenetre).getByRole("button", { name: "Neo, Légendaire, nouvelle" })).toBeTruthy();
-    expect(within(fenetre).getByText("Nouvelle !")).toBeTruthy();
+    expect(within(fenetre).getByRole("button", { name: "Figurant, Commune" })).toBeTruthy();
 
-    fireEvent.click(within(fenetre).getByRole("button", { name: "Tout retourner" }));
-    expect(within(fenetre).getAllByText("Doublon · +1 💎")).toHaveLength(4);
-    expect(within(fenetre).getByText("Fragments : 34 💎")).toBeTruthy();
-    expect(within(fenetre).queryByRole("button", { name: /Ouvrir le suivant/ })).toBeNull();
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(within(fenetre).getByRole("button", { name: "Tout retourner" }));
+      // Les 4 premières sont retournées ; la dernière se fait attendre…
+      expect(within(fenetre).getAllByText("Doublon · +1 💎")).toHaveLength(4);
+      expect(within(fenetre).getByText(/Quelque chose de rare arrive/)).toBeTruthy();
+      expect(within(fenetre).getByRole("button", { name: "Retourner la carte 5" })).toBeTruthy();
+
+      act(() => vi.advanceTimersByTime(2000));
+      // … puis elle se retourne, avec la bannière.
+      expect(within(fenetre).getByRole("button", { name: "Neo, Légendaire, nouvelle" })).toBeTruthy();
+      expect(screen.getByRole("status").textContent).toContain("Légendaire !");
+      expect(within(fenetre).getByText("Fragments : 34 💎")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

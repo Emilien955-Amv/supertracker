@@ -1,6 +1,8 @@
 """Routes des cartes : collection, ouverture de boosters, fabrication."""
 
-from fastapi import APIRouter, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.deps import CurrentUser, HttpDep, ProvidersDep, SessionDep
 from app.core.rate_limit import enforce_rate_limit
@@ -13,6 +15,8 @@ from app.schemas.cards import (
     CraftResult,
     DrawnCardRead,
     OpenRequest,
+    PackContents,
+    RarityCount,
     RarityStat,
     ThemeRead,
 )
@@ -59,6 +63,36 @@ async def my_collection(
                 craft_cost=service.CRAFT_COST.get(Rarity(e.card.rarity)),
             )
             for e in entries
+        ],
+    )
+
+
+@router.get("/packs/{theme}", summary="Cartes qu'on peut obtenir dans un pack")
+async def pack_contents(
+    user: CurrentUser,
+    session: SessionDep,
+    theme: service.PackTheme,
+    rarity: Rarity | None = None,
+    q: Annotated[str | None, Query(max_length=100, description="Personnage ou œuvre")] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 60,
+) -> PackContents:
+    page = await service.pack_cards(
+        session, user.id, theme, rarity, (q or "").strip() or None, offset, limit
+    )
+    return PackContents(
+        theme=theme,
+        label=service.THEME_LABELS[theme],
+        total=page.total,
+        matching=page.matching,
+        rarities=[RarityCount(rarity=r, count=page.by_rarity.get(r, 0)) for r in Rarity],
+        cards=[
+            CollectionCard(
+                **CardRead.of(e.card, e.content).model_dump(),
+                owned=e.owned,
+                craft_cost=service.CRAFT_COST.get(Rarity(e.card.rarity)),
+            )
+            for e in page.entries
         ],
     )
 

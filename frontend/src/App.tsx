@@ -4,6 +4,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { GuestOnly, RequireAuth } from "./auth/guards";
 import { AppShell } from "./components/AppShell";
 import CardsPage from "./pages/CardsPage";
+import PackPage from "./pages/PackPage";
 import ContentPage from "./pages/ContentPage";
 import HomePage from "./pages/HomePage";
 import LibrariesPage from "./pages/LibrariesPage";
@@ -36,6 +37,7 @@ export function AppRoutes() {
         <Route path="/bibliotheques/:id" element={<LibraryPage />} />
         <Route path="/profil" element={<ProfilePage />} />
         <Route path="/cartes" element={<CardsPage />} />
+        <Route path="/cartes/pack/:theme" element={<PackPage />} />
       </Route>
 
       <Route

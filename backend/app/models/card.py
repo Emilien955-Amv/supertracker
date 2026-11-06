@@ -33,10 +33,9 @@ class Rarity(StrEnum):
 
 
 class CardKind(StrEnum):
-    POSTER = "poster"  # affiche
-    BACKDROP = "backdrop"  # image de fond
-    STILL = "still"  # image d'un épisode
-    CHARACTER = "character"  # personnage
+    # Uniquement des personnages (pas d'affiches ni de décors). Le champ est
+    # gardé pour pouvoir ajouter d'autres sortes de cartes plus tard.
+    CHARACTER = "character"
 
 
 class Card(Base):
@@ -123,3 +122,14 @@ class CardWallet(Base):
     # Dernier « créneau » de 5 minutes pour lequel un booster gratuit a été donné
     # (nombre de tranches de 5 min depuis 1970). None : jamais.
     timer_slot: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class ContentPlatform(Base):
+    """Plateforme où un contenu est inclus dans l'abonnement (boosters Netflix…)."""
+
+    __tablename__ = "content_platforms"
+
+    content_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("contents.id", ondelete="CASCADE"), primary_key=True
+    )
+    platform: Mapped[str] = mapped_column(String(20), primary_key=True, index=True)

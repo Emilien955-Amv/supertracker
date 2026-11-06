@@ -338,7 +338,7 @@ async def test_tmdb_personnages_classes_par_importance() -> None:
         ]
         + [
             {"order": 10 + i, "character": f"Rôle {i}", "name": "Y", "profile_path": f"/{i}.jpg"}
-            for i in range(20)
+            for i in range(30)
         ]
     }
 
@@ -349,7 +349,7 @@ async def test_tmdb_personnages_classes_par_importance() -> None:
     async with faux_client(handler) as http:
         persos = await TmdbProvider("jeton").get_characters(http, ContentKind.MOVIE, "603")
 
-    assert len(persos) == 15  # les 15 plus importants seulement
+    assert len(persos) == 25  # les 25 plus importants seulement
     assert (persos[0].name, persos[0].role) == ("Neo", CharacterRole.HERO)
     assert persos[0].image_url == "https://image.tmdb.org/t/p/h632/n.jpg"
     assert (persos[1].name, persos[1].role) == ("Morpheus", CharacterRole.MAIN)
@@ -387,3 +387,26 @@ async def test_anilist_personnages_premier_role_principal_devient_heros() -> Non
         ("Zoro", CharacterRole.MAIN),
         ("Koby", CharacterRole.SUPPORTING),  # image par défaut : ignoré
     ]
+
+
+async def test_tmdb_titres_d_une_plateforme_sans_les_animes() -> None:
+    requetes: list[httpx.Request] = []
+    page = {
+        "total_pages": 1,
+        "results": [
+            {"id": 1, "name": "Stranger Things", "genre_ids": [18]},
+            {"id": 2, "name": "One Piece", "genre_ids": [16], "original_language": "ja"},
+        ],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requetes.append(request)
+        return httpx.Response(200, json=page)
+
+    async with faux_client(handler) as http:
+        titres = await TmdbProvider("jeton").get_platform_titles(http, ContentKind.SERIES, 8)
+
+    assert [t.title for t in titres] == ["Stranger Things"]  # l'anime vient d'AniList
+    params = requetes[0].url.params
+    assert requetes[0].url.path == "/3/discover/tv"
+    assert (params["with_watch_providers"], params["watch_region"]) == ("8", "FR")

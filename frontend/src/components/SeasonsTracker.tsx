@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch } from "../lib/api";
 import { formatDate } from "../lib/catalog";
@@ -16,17 +16,91 @@ type Props = {
   onStateChange: (state: ContentState) => void;
 };
 
+/** Dernière action, pour pouvoir l'annuler (erreur de clic). */
+type Undo = { ids: number[]; watched: boolean };
+const UNDO_MS = 10_000;
+
 /** Liste des saisons ; chacune se déplie pour cocher ses épisodes. */
 export function SeasonsTracker({ path, seasons, onStateChange }: Props) {
+  // Incrémenté après une action sur plusieurs saisons : les saisons ouvertes
+  // se rechargent pour afficher les bonnes cases.
+  const [version, setVersion] = useState(0);
+  const [undo, setUndo] = useState<Undo | null>(null);
+  const [undoError, setUndoError] = useState<string | null>(null);
+  const firstSeason = Math.min(...seasons.map((s) => s.number).filter((n) => n > 0));
+
+  useEffect(() => {
+    if (!undo) return;
+    const timer = setTimeout(() => setUndo(null), UNDO_MS);
+    return () => clearTimeout(timer);
+  }, [undo]);
+
+  const changed = useCallback(
+    (state: ContentState, watched: boolean, reloadAll: boolean) => {
+      onStateChange(state);
+      announceRewards(state.rewards);
+      const ids = state.changed_episode_ids ?? [];
+      setUndo(ids.length ? { ids, watched } : null);
+      if (reloadAll) setVersion((v) => v + 1);
+    },
+    [onStateChange],
+  );
+
+  async function cancel() {
+    if (!undo) return;
+    setUndoError(null);
+    try {
+      const state = await apiFetch<ContentState>(`${path}/episodes`, {
+        method: "POST",
+        body: { episode_ids: undo.ids, watched: !undo.watched },
+      });
+      onStateChange(state);
+      setUndo(null);
+      setVersion((v) => v + 1);
+    } catch (err) {
+      setUndoError(err instanceof Error ? err.message : "Échec de l'annulation.");
+    }
+  }
+
   return (
     <section aria-labelledby="saisons" className="mt-8">
       <h2 id="saisons" className="text-lg font-semibold">
         Saisons et épisodes
       </h2>
+      {undo && (
+        <div
+          role="status"
+          className="sticky top-2 z-10 mt-3 flex items-center justify-between gap-3 rounded-xl border border-accent/50 bg-surface p-3 text-sm shadow-lg"
+        >
+          <span>
+            {undo.ids.length} épisode{undo.ids.length > 1 ? "s" : ""} marqué
+            {undo.ids.length > 1 ? "s" : ""} comme {undo.watched ? "vu" : "pas vu"}
+            {undo.ids.length > 1 ? "s" : ""}.
+          </span>
+          <button
+            type="button"
+            onClick={() => void cancel()}
+            className="shrink-0 rounded-lg bg-accent px-3 py-1.5 font-semibold text-white"
+          >
+            Annuler
+          </button>
+        </div>
+      )}
+      {undoError && (
+        <p role="alert" className="mt-2 text-sm text-error">
+          {undoError}
+        </p>
+      )}
       <ul className="mt-3 divide-y divide-border rounded-xl border border-border bg-surface">
         {seasons.map((season) => (
           <li key={season.number}>
-            <Season path={path} season={season} onStateChange={onStateChange} />
+            <Season
+              path={path}
+              season={season}
+              isFirst={season.number === firstSeason}
+              version={version}
+              onChanged={changed}
+            />
           </li>
         ))}
       </ul>
@@ -42,15 +116,31 @@ type Load =
 function Season({
   path,
   season,
-  onStateChange,
+  isFirst,
+  version,
+  onChanged,
 }: {
   path: string;
   season: SeasonSummary;
-  onStateChange: (state: ContentState) => void;
+  /** Première saison (hors épisodes spéciaux) : pas de « vu jusqu'ici » au 1er épisode. */
+  isFirst: boolean;
+  version: number;
+  onChanged: (state: ContentState, watched: boolean, reloadAll: boolean) => void;
 }) {
   const [load, setLoad] = useState<Load>({ status: "idle" });
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const loaded = load.status === "ready";
+
+  // Action sur plusieurs saisons ailleurs : on recharge si déjà ouverte.
+  useEffect(() => {
+    if (version === 0 || !loaded) return;
+    apiFetch<EpisodeRead[]>(`${path}/seasons/${season.number}`)
+      .then((episodes) => setLoad({ status: "ready", episodes }))
+      .catch(() => undefined); // l'affichage actuel reste valable
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seulement quand version change
+  }, [version]);
 
   async function open() {
     // Les épisodes ne sont chargés qu'à la première ouverture de la saison.
@@ -80,11 +170,27 @@ function Season({
         method: "POST",
         body: { episode_ids: ids, watched },
       });
-      onStateChange(state);
-      announceRewards(state.rewards);
+      onChanged(state, watched, false);
     } catch (err) {
       setLoad({ status: "ready", episodes: previous });
       setError(err instanceof Error ? err.message : "Échec de l'enregistrement.");
+    }
+  }
+
+  /** « Vu jusqu'ici » (saisons précédentes comprises) ou « pas vu à partir d'ici ». */
+  async function until(episode: EpisodeRead, watched: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      const state = await apiFetch<ContentState>(`${path}/watched-until`, {
+        method: "POST",
+        body: { season_number: season.number, episode_number: episode.number, watched },
+      });
+      onChanged(state, watched, true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Échec de l'enregistrement.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -153,7 +259,9 @@ function Season({
             <ul className="space-y-1">
               {episodes.slice(0, visible).map((episode, index) => {
                 const upcoming = episode.air_date !== null && episode.air_date > today;
-                const before = episodes.slice(0, index + 1).filter((e) => !e.watched);
+                // Saison spéciale (0) : pas de « jusqu'ici », l'ordre n'a pas de sens.
+                const special = season.number === 0;
+                const canWatchUntil = !special && !episode.watched && !(isFirst && index === 0);
                 return (
                   <li key={episode.id} className="flex items-center gap-3 rounded-lg px-1 py-1.5">
                     <input
@@ -172,15 +280,28 @@ function Season({
                         {upcoming ? `À venir · ${formatDate(episode.air_date)}` : formatDate(episode.air_date)}
                       </span>
                     </label>
-                    {/* « Vu jusqu'ici » : rattrape plusieurs épisodes d'un coup. */}
-                    {!episode.watched && before.length > 1 && (
+                    {/* « Vu jusqu'ici » : rattrape tout, saisons précédentes comprises. */}
+                    {canWatchUntil && (
                       <button
                         type="button"
-                        onClick={() => void mark(before.map((e) => e.id), true)}
-                        aria-label={`Marquer comme vus tous les épisodes jusqu'au ${episode.number}`}
-                        className="shrink-0 rounded-md px-2 py-1 text-xs text-accent hover:bg-accent/10"
+                        disabled={busy}
+                        onClick={() => void until(episode, true)}
+                        aria-label={`Marquer comme vus tous les épisodes jusqu'à la saison ${season.number}, épisode ${episode.number}`}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs text-accent hover:bg-accent/10 disabled:opacity-40"
                       >
                         Vu jusqu'ici
+                      </button>
+                    )}
+                    {/* Erreur de clic : décoche cet épisode et tous les suivants. */}
+                    {!special && episode.watched && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void until(episode, false)}
+                        aria-label={`Marquer comme pas vus tous les épisodes à partir de la saison ${season.number}, épisode ${episode.number}`}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs text-muted hover:bg-bg hover:text-error disabled:opacity-40"
+                      >
+                        Pas vu à partir d'ici
                       </button>
                     )}
                   </li>

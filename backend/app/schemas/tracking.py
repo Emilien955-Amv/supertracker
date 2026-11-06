@@ -62,6 +62,8 @@ class ContentState(BaseModel):
     progress: ProgressRead
     # Récompenses de l'action qui vient d'avoir lieu (absent en simple lecture).
     rewards: RewardsRead | None = None
+    # Épisodes que l'action vient de modifier (pour pouvoir l'annuler).
+    changed_episode_ids: list[int] = []
 
 
 class TrackedItem(BaseModel):
@@ -81,6 +83,14 @@ class EpisodeRead(BaseModel):
     runtime_minutes: int | None
     still_url: str | None
     watched: bool = False
+
+
+class WatchedUntilWrite(BaseModel):
+    """« Vu jusqu'ici » (watched=True) ou « pas vu à partir d'ici » (False)."""
+
+    season_number: int = Field(ge=1, le=500)
+    episode_number: int = Field(ge=1, le=100_000)
+    watched: bool
 
 
 class EpisodesWatchedWrite(BaseModel):

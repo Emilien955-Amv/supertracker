@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import Subquery, delete, func, select
+from sqlalchemy import Subquery, and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -157,7 +157,7 @@ async def set_episodes_watched(
     content: Content,
     episode_ids: list[int],
     watched: bool,
-) -> tuple[Tracking | None, Rewards]:
+) -> tuple[Tracking | None, Rewards, list[int]]:
     """Coche ou décoche des épisodes, puis ajuste le statut automatiquement :
     - premier épisode coché → « en cours » ;
     - tous les épisodes d'une série terminée cochés → « terminé » ;
@@ -224,7 +224,44 @@ async def set_episodes_watched(
     await session.commit()
     if tracking is not None:
         await session.refresh(tracking)
-    return tracking, rewards
+    # Les épisodes réellement modifiés : permettent d'annuler l'action.
+    return tracking, rewards, sorted(changed_ids)
+
+
+async def episodes_until(
+    session: AsyncSession,
+    user_id: int,
+    content: Content,
+    season_number: int,
+    episode_number: int,
+    watched: bool,
+) -> list[int]:
+    """Épisodes à modifier pour « vu jusqu'ici » ou « pas vu à partir d'ici ».
+
+    - watched=True : tous les épisodes NON vus avant ce point (saisons
+      précédentes comprises) et celui-ci ;
+    - watched=False : tous les épisodes VUS à partir de ce point (saisons
+      suivantes comprises).
+    Les épisodes spéciaux (saison 0) ne sont jamais concernés.
+    """
+    if watched:
+        position = or_(
+            Episode.season_number < season_number,
+            and_(Episode.season_number == season_number, Episode.number <= episode_number),
+        )
+    else:
+        position = or_(
+            Episode.season_number > season_number,
+            and_(Episode.season_number == season_number, Episode.number >= episode_number),
+        )
+    seen = select(EpisodeView.episode_id).where(EpisodeView.user_id == user_id)
+    query = select(Episode.id).where(
+        Episode.content_id == content.id,
+        Episode.season_number > 0,
+        position,
+        Episode.id.in_(seen) if not watched else Episode.id.not_in(seen),
+    )
+    return list(await session.scalars(query))
 
 
 async def list_trackings(

@@ -45,7 +45,7 @@ query ($id: Int) {
 CHARACTERS_QUERY = """
 query ($id: Int) {
   Media(id: $id, type: ANIME) {
-    characters(sort: [ROLE, RELEVANCE, ID], perPage: 25) {
+    characters(sort: [ROLE, RELEVANCE, ID], perPage: 40) {
       edges {
         role
         node { name { full } image { large } }
@@ -61,15 +61,20 @@ ANILIST_ROLES = {
     "SUPPORTING": CharacterRole.SUPPORTING,
     "BACKGROUND": CharacterRole.BACKGROUND,
 }
-MAX_CHARACTERS = 15
+MAX_CHARACTERS = 25
+POPULAR_PAGES = 3  # 3 × 50 animes les plus populaires
+# Seconds rôles : les 4 premiers sont Rares, les 6 suivants « récurrents ».
+SUPPORTING_RARE = 4
+SUPPORTING_RECURRING = 6
 
 POPULAR_QUERY = f"""
-query {{
-  Page(perPage: 40) {{
+query ($page: Int) {{
+  Page(page: $page, perPage: 50) {{
     media(type: ANIME, isAdult: false, sort: POPULARITY_DESC) {{
       {_CHAMPS_COMMUNS}
       bannerImage
       siteUrl
+      externalLinks {{ site type }}
     }}
   }}
 }}
@@ -258,6 +263,7 @@ class AniListProvider:
         edges = (((data.get("Media") or {}).get("characters")) or {}).get("edges") or []
         characters: list[CharacterSummary] = []
         hero_given = False
+        supporting = 0
         for edge in edges:
             node = edge.get("node") or {}
             name = ((node.get("name") or {}).get("full") or "").strip()
@@ -268,6 +274,12 @@ class AniListProvider:
             role = ANILIST_ROLES.get(edge.get("role", ""), CharacterRole.BACKGROUND)
             if role == CharacterRole.MAIN and not hero_given:
                 role, hero_given = CharacterRole.HERO, True
+            elif role == CharacterRole.SUPPORTING:
+                supporting += 1
+                if supporting > SUPPORTING_RARE + SUPPORTING_RECURRING:
+                    role = CharacterRole.BACKGROUND
+                elif supporting > SUPPORTING_RARE:
+                    role = CharacterRole.RECURRING
             characters.append(
                 CharacterSummary(
                     name=name[:200],
@@ -283,9 +295,12 @@ class AniListProvider:
     async def get_popular(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
         if kind != ContentKind.ANIME:
             return []
-        data = await self._query(http, POPULAR_QUERY, {})
+        medias: list[dict[str, Any]] = []
+        for page in range(1, POPULAR_PAGES + 1):
+            data = await self._query(http, POPULAR_QUERY, {"page": page})
+            medias += (data.get("Page") or {}).get("media", [])
         items = []
-        for media in (data.get("Page") or {}).get("media", []):
+        for media in medias:
             base = self._result(media)
             cover = media.get("coverImage") or {}
             items.append(
@@ -294,6 +309,23 @@ class AniListProvider:
                     poster_url=cover.get("extraLarge") or cover.get("large"),
                     backdrop_url=media.get("bannerImage"),
                     source_url=media.get("siteUrl") or f"https://anilist.co/anime/{media['id']}",
+                    streaming_sites=[
+                        link["site"]
+                        for link in media.get("externalLinks") or []
+                        if link.get("type") == "STREAMING" and link.get("site")
+                    ],
                 )
             )
         return items
+
+    async def find_anime(self, http: httpx.AsyncClient, title: str) -> ContentDetail | None:
+        """Retrouve un anime par son titre (japonais ou traduit). Sert à relier
+        les catalogues Crunchyroll et ADN (connus de TMDB) aux fiches AniList."""
+        results = await self.search(http, title)
+        if not results:
+            return None
+        best = results[0]
+        return ContentDetail(
+            **best.model_dump(),
+            source_url=f"https://anilist.co/anime/{best.external_id}",
+        )

@@ -77,3 +77,40 @@ body {
     animation: none;
   }
 }
+
+/* Révélation d'une dernière carte Légendaire, Mythique ou Divine. */
+@keyframes card-shake {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  20% { transform: translateX(-4px) rotate(-2deg); }
+  40% { transform: translateX(4px) rotate(2deg); }
+  60% { transform: translateX(-3px) rotate(-1deg); }
+  80% { transform: translateX(3px) rotate(1deg); }
+}
+.card-suspense {
+  animation: card-shake 0.45s ease-in-out infinite;
+  filter: drop-shadow(0 0 18px var(--glow));
+}
+@keyframes reveal-burst {
+  0% { opacity: 0; transform: scale(0.4); }
+  60% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.reveal-banner {
+  animation: reveal-burst 0.6s ease-out both;
+  text-shadow: 0 0 24px var(--glow), 0 0 48px var(--glow);
+}
+@keyframes reveal-pulse {
+  50% { opacity: 0.55; }
+}
+.reveal-backdrop {
+  background: radial-gradient(circle at 50% 60%, var(--glow), transparent 65%);
+  opacity: 0.3;
+  animation: reveal-pulse 0.9s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-suspense,
+  .reveal-banner,
+  .reveal-backdrop {
+    animation: none;
+  }
+}

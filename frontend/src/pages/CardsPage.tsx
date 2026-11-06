@@ -1,16 +1,26 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 
 import { BoosterReveal } from "../components/BoosterReveal";
 import { CardBack, GameCard } from "../components/GameCard";
 import { apiFetch } from "../lib/api";
-import { RARITIES, RARITY_COLORS, RARITY_LABELS, THEME_ICONS } from "../lib/cards";
+import {
+  GENRE_THEMES,
+  PLATFORM_COLORS,
+  RARITIES,
+  RARITY_COLORS,
+  RARITY_LABELS,
+  THEME_ICONS,
+} from "../lib/cards";
 import type {
   BoosterOpened,
   CardRead,
   Collection,
   CollectionCard,
+  GenreTheme,
   PackTheme,
+  PlatformTheme,
   Rarity,
 } from "../lib/cards";
 import { useApiResource } from "../lib/useApi";
@@ -111,22 +121,37 @@ export default function CardsPage() {
         {collection.boosters > 0 && (
           <>
             <p className="mt-4 text-center text-sm text-muted">Choisissez votre pack :</p>
+            <h3 className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Par genre</h3>
             <ul className="mt-2 grid grid-cols-2 gap-2">
-              {collection.themes.map((theme) => (
-                <li key={theme.theme}>
-                  <button
-                    type="button"
-                    onClick={() => void openBooster(theme.theme)}
-                    disabled={busy || theme.cards === 0}
-                    className="w-full rounded-xl border border-accent/50 bg-surface px-3 py-3 font-semibold hover:bg-accent/20 disabled:opacity-40"
-                  >
-                    <span aria-hidden="true">{THEME_ICONS[theme.theme]}</span> {theme.label}
-                    <span className="block text-xs font-normal text-muted">
-                      {theme.cards > 0 ? `${theme.cards} cartes` : "En préparation…"}
-                    </span>
-                  </button>
-                </li>
-              ))}
+              {collection.themes
+                .filter((theme) => GENRE_THEMES.includes(theme.theme as GenreTheme))
+                .map((theme) => (
+                  <li key={theme.theme}>
+                    <PackButton theme={theme} busy={busy} onOpen={() => void openBooster(theme.theme)}>
+                      <span aria-hidden="true">{THEME_ICONS[theme.theme as GenreTheme]}</span>{" "}
+                      {theme.label}
+                    </PackButton>
+                  </li>
+                ))}
+            </ul>
+            <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted">
+              Par plateforme <span className="normal-case">(films et séries)</span>
+            </h3>
+            <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {collection.themes
+                .filter((theme) => !GENRE_THEMES.includes(theme.theme as GenreTheme))
+                .map((theme) => (
+                  <li key={theme.theme}>
+                    <PackButton
+                      theme={theme}
+                      busy={busy}
+                      onOpen={() => void openBooster(theme.theme)}
+                      color={PLATFORM_COLORS[theme.theme as PlatformTheme]}
+                    >
+                      {theme.label}
+                    </PackButton>
+                  </li>
+                ))}
             </ul>
           </>
         )}
@@ -194,8 +219,7 @@ export default function CardsPage() {
       {collection.cards.length === 0 ? (
         <div className="mt-6 rounded-xl border border-border bg-surface p-6 text-center">
           <p className="text-muted">
-            Ouvrez un booster pour commencer votre collection ! Les contenus que vous suivez y
-            apparaissent aussi.
+            Ouvrez un booster pour commencer votre collection de personnages !
           </p>
           <Link to="/recherche" className="mt-3 inline-block text-accent hover:underline">
             Suivre un contenu →
@@ -244,6 +268,48 @@ export default function CardsPage() {
         />
       )}
     </main>
+  );
+}
+
+/** Bouton d'un pack : nom, nombre de cartes, désactivé s'il est vide. */
+function PackButton({
+  theme,
+  busy,
+  onOpen,
+  color,
+  children,
+}: {
+  theme: Collection["themes"][number];
+  busy: boolean;
+  onOpen: () => void;
+  color?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onOpen}
+        disabled={busy || theme.cards === 0}
+        aria-label={`Ouvrir un pack ${theme.label}`}
+        className="w-full rounded-xl border border-accent/50 bg-surface px-3 py-3 font-semibold hover:bg-accent/20 disabled:opacity-40"
+        style={color ? { borderLeft: `6px solid ${color}` } : undefined}
+      >
+        {children}
+        <span className="block text-xs font-normal text-muted">
+          {theme.cards > 0 ? `${theme.cards} cartes` : "En préparation…"}
+        </span>
+      </button>
+      {theme.cards > 0 && (
+        <Link
+          to={`/cartes/pack/${theme.theme}`}
+          className="mt-1 block text-center text-xs text-accent hover:underline"
+        >
+          Voir les cartes
+          <span className="sr-only"> du pack {theme.label}</span>
+        </Link>
+      )}
+    </div>
   );
 }
 

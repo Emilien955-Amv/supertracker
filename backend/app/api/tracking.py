@@ -22,7 +22,9 @@ from app.schemas.tracking import (
     TrackedItem,
     TrackingRead,
     TrackingWrite,
+    WatchedUntilWrite,
 )
+from app.services import catalog
 from app.services import content as content_service
 from app.services import tracking as tracking_service
 from app.services.gamification import Rewards
@@ -195,9 +197,53 @@ async def mark_episodes(
 ) -> ContentState:
     content = await _load_content(session, http, providers, user.id, source, kind, external_id)
     try:
-        _, rewards = await tracking_service.set_episodes_watched(
+        _, rewards, changed = await tracking_service.set_episodes_watched(
             session, user.id, content, body.episode_ids, body.watched
         )
     except tracking_service.EpisodeNotFoundError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Épisode introuvable.") from None
-    return await _state(session, user.id, content, rewards)
+    state = await _state(session, user.id, content, rewards)
+    return state.model_copy(update={"changed_episode_ids": changed})
+
+
+@router.post(
+    CONTENT_PATH + "/watched-until",
+    summary="Vu jusqu'ici (saisons précédentes comprises) ou pas vu à partir d'ici",
+    responses=ERRORS,
+)
+async def mark_until(
+    user: CurrentUser,
+    session: SessionDep,
+    http: HttpDep,
+    providers: ProvidersDep,
+    source: Source,
+    kind: ContentKind,
+    external_id: ExternalId,
+    body: WatchedUntilWrite,
+) -> ContentState:
+    if kind == ContentKind.MOVIE:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Un film n'a pas d'épisodes.")
+    content = await _load_content(session, http, providers, user.id, source, kind, external_id)
+    if body.watched:
+        # Les saisons précédentes n'ont peut-être jamais été ouvertes : on
+        # copie leurs épisodes depuis la source avant de les cocher.
+        try:
+            detail = await catalog.get_detail(http, providers, source, kind, external_id)
+            numbers = [s.number for s in (detail.seasons if detail else [])]
+            for number in sorted(n for n in numbers if 0 < n <= body.season_number):
+                await content_service.ensure_season(session, http, providers, content, number)
+        except (ProviderError, content_service.ContentNotFoundError):
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                "La source de données ne répond pas. Réessayez dans un instant.",
+            ) from None
+    ids = await tracking_service.episodes_until(
+        session, user.id, content, body.season_number, body.episode_number, body.watched
+    )
+    if not ids:
+        return await _state(session, user.id, content)
+    _, rewards, changed = await tracking_service.set_episodes_watched(
+        session, user.id, content, ids, body.watched
+    )
+    state = await _state(session, user.id, content, rewards)
+    return state.model_copy(update={"changed_episode_ids": changed})

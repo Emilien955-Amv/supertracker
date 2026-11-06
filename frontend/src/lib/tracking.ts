@@ -53,6 +53,8 @@ export type ContentState = {
   progress: Progress;
   /** Ce que la dernière action a rapporté (absent en simple lecture). */
   rewards?: Rewards | null;
+  /** Épisodes que l'action vient de modifier (pour l'annuler). */
+  changed_episode_ids?: number[];
 };
 
 export type TrackedItem = { content: ContentRead; tracking: TrackingRead; progress: Progress };

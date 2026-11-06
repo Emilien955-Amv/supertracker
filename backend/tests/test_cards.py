@@ -123,7 +123,7 @@ async def test_doublons_en_fragments(db_client: AsyncClient, contexte: Contexte)
             if not tirage["is_new"]:
                 assert tirage["fragments"] > 0
                 fragments += tirage["fragments"]
-    # 15 cartes tirées parmi 6 cartes Matrix : forcément des doublons.
+    # 15 cartes tirées parmi 7 cartes Matrix : forcément des doublons.
     assert fragments > 0
     assert (await collection(db_client))["fragments"] == fragments
 
@@ -221,7 +221,80 @@ async def test_catalogue_des_contenus_populaires(
         [contexte.source],
     )
 
-    assert traites == 1
+    assert traites == 2  # Pulp Fiction et Frieren
     # Personne ne suit Pulp Fiction, et pourtant ses cartes sont tirables.
     booster = await ouvrir(db_client, "movie")
     assert {c["card"]["content"]["title"] for c in booster["cards"]} == {"Pulp Fiction"}
+    # Uniquement des personnages : ni affiche ni décor.
+    assert {c["card"]["kind"] for c in booster["cards"]} == {"character"}
+
+
+@pytest.mark.integration
+async def test_packs_par_plateforme(db_client: AsyncClient, contexte: Contexte) -> None:
+    await db_client.put(FILM, json={"status": "watching"})  # Matrix : sur aucune plateforme
+    await card_catalog.seed_catalog(
+        contexte.session,
+        None,  # type: ignore[arg-type]  (la fausse source n'utilise pas le réseau)
+        [contexte.source],
+    )
+    moi = await collection(db_client)
+    packs = {theme["theme"]: theme["cards"] for theme in moi["themes"]}
+    assert packs["netflix"] == 7  # les 7 cartes de Pulp Fiction
+    assert packs["disney"] == 0
+
+    booster = await ouvrir(db_client, "netflix")
+    assert {c["card"]["content"]["title"] for c in booster["cards"]} == {"Pulp Fiction"}
+    await offrir_boosters(contexte, 1)
+    response = await db_client.post("/api/cards/boosters/open", json={"theme": "disney"})
+    assert response.status_code == 409  # aucune carte Disney+ pour l'instant
+
+
+@pytest.mark.integration
+async def test_anime_signale_sur_crunchyroll(db_client: AsyncClient, contexte: Contexte) -> None:
+    await card_catalog.seed_catalog(
+        contexte.session,
+        None,  # type: ignore[arg-type]
+        [contexte.source],
+    )
+    booster = await ouvrir(db_client, "crunchyroll")
+    assert {c["card"]["content"]["title"] for c in booster["cards"]} == {"Frieren"}
+
+
+@pytest.mark.integration
+async def test_liste_des_cartes_d_un_pack(db_client: AsyncClient, contexte: Contexte) -> None:
+    await card_catalog.seed_catalog(
+        contexte.session,
+        None,  # type: ignore[arg-type]
+        [contexte.source],
+    )
+
+    pack = (await db_client.get("/api/cards/packs/netflix")).json()
+    assert (pack["label"], pack["total"], pack["matching"]) == ("Netflix", 7, 7)
+    # De la plus rare à la plus commune.
+    assert [c["rarity"] for c in pack["cards"]] == [
+        "divine",
+        "mythic",
+        "legendary",
+        "epic",
+        "rare",
+        "uncommon",
+        "common",
+    ]
+    assert not any(c["owned"] for c in pack["cards"])
+    assert {r["rarity"]: r["count"] for r in pack["rarities"]}["epic"] == 1
+    # Une seule Divine par œuvre : celle de son héros.
+    assert {r["rarity"]: r["count"] for r in pack["rarities"]}["divine"] == 1
+
+    epiques = (await db_client.get("/api/cards/packs/netflix", params={"rarity": "epic"})).json()
+    assert [c["title"] for c in epiques["cards"]] == ["Morpheus (680)"]
+    trouve = (await db_client.get("/api/cards/packs/netflix", params={"q": "tank"})).json()
+    assert [c["title"] for c in trouve["cards"]] == ["Tank (680)"]
+    # Les caractères spéciaux ne cassent pas la recherche.
+    assert (await db_client.get("/api/cards/packs/netflix", params={"q": "%_"})).json()[
+        "matching"
+    ] == 0
+    page2 = (
+        await db_client.get("/api/cards/packs/netflix", params={"offset": 5, "limit": 5})
+    ).json()
+    assert len(page2["cards"]) == 2
+    assert (await db_client.get("/api/cards/packs/inconnu")).status_code == 422

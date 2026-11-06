@@ -24,6 +24,7 @@ from app.providers.base import (
     EpisodeSummary,
     ProviderError,
     SearchResult,
+    SeasonSummary,
     Source,
 )
 from app.providers.registry import get_providers
@@ -130,6 +131,11 @@ class FausseSource:
                 external_id="1399",
                 title="Game of Thrones",
                 episodes_count=3,
+                seasons=[
+                    SeasonSummary(number=1, name="Saison 1", episode_count=2),
+                    SeasonSummary(number=2, name="Saison 2", episode_count=1),
+                    SeasonSummary(number=0, name="Épisodes spéciaux", episode_count=1),
+                ],
                 source_url="https://exemple.fr/1399",
                 is_finished=True,
             )
@@ -149,7 +155,18 @@ class FausseSource:
         ]
 
     async def get_popular(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
-        """Un seul contenu populaire (un film), pour tester le catalogue."""
+        """Un film populaire, et un anime signalé sur Crunchyroll."""
+        if kind == ContentKind.ANIME:
+            return [
+                ContentDetail(
+                    source=Source.TMDB,
+                    kind=ContentKind.ANIME,
+                    external_id="9001",
+                    title="Frieren",
+                    source_url="https://exemple.fr/9001",
+                    streaming_sites=["Crunchyroll", "Site inconnu"],
+                )
+            ]
         if kind != ContentKind.MOVIE:
             return []
         return [
@@ -163,14 +180,23 @@ class FausseSource:
             )
         ]
 
+    async def get_platform_titles(
+        self, http: httpx.AsyncClient, kind: ContentKind, provider_id: int, anime: bool = False
+    ) -> list[ContentDetail]:
+        """Netflix (8) propose Pulp Fiction ; les autres plateformes, rien."""
+        if anime or provider_id != 8 or kind != ContentKind.MOVIE:
+            return []
+        return await self.get_popular(http, kind)
+
     async def get_characters(
         self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
     ) -> list[CharacterSummary]:
-        """Un héros, un rôle principal, un second rôle et un figurant."""
+        """Un personnage de chaque importance."""
         roles = [
             ("Neo", CharacterRole.HERO),
             ("Morpheus", CharacterRole.MAIN),
             ("Oracle", CharacterRole.SUPPORTING),
+            ("Tank", CharacterRole.RECURRING),
             ("Figurant", CharacterRole.BACKGROUND),
         ]
         return [
@@ -207,7 +233,7 @@ async def contexte(db_client: AsyncClient, db_session: AsyncSession) -> AsyncIte
     # annulée à la fin. Les vraies données ne sont donc jamais touchées.
     await db_session.execute(
         delete(Content).where(
-            Content.source == "tmdb", Content.external_id.in_(["603", "1399", "680"])
+            Content.source == "tmdb", Content.external_id.in_(["603", "1399", "680", "9001"])
         )
     )
     # Le catalogue de cartes local (contenus populaires) est vidé lui aussi,

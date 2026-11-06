@@ -58,7 +58,8 @@ class CharacterRole(StrEnum):
     HERO = "hero"  # LE personnage principal (premier rôle)
     MAIN = "main"  # rôles principaux
     SUPPORTING = "supporting"  # seconds rôles
-    BACKGROUND = "background"  # figurants et petits rôles
+    RECURRING = "recurring"  # personnages récurrents
+    BACKGROUND = "background"  # petits rôles
 
 
 class CharacterSummary(BaseModel):
@@ -101,6 +102,8 @@ class ContentDetail(SearchResult):
     # Plus aucun épisode ne sortira (série terminée ou annulée, film sorti) :
     # permet de passer automatiquement le suivi à « terminé ».
     is_finished: bool = False
+    # Sites de streaming signalés par la source (ex. « Crunchyroll », « Netflix »).
+    streaming_sites: list[str] = []
     # None : la source ne fournit pas cette information (ex. AniList).
     watch: WatchAvailability | None = None
 

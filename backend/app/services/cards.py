@@ -1,20 +1,22 @@
-"""Cartes à collectionner : catalogue, boosters par thème, fragments.
+"""Cartes à collectionner : des PERSONNAGES, en boosters par thème.
 
-Raretés et probabilités par carte tirée :
-    Commune      50 %    affiches, figurants
-    Peu commune  25 %    images de fond, images d'épisodes
-    Rare         13 %    seconds rôles, premier et dernier épisodes
+Raretés (probabilité par carte tirée) selon l'importance du personnage :
+    Commune      50 %    petits rôles
+    Peu commune  25 %    personnages récurrents
+    Rare         13 %    seconds rôles
     Épique        7 %    rôles principaux
-    Légendaire    3,5 %  LE héros (le personnage principal)
+    Légendaire    3,5 %  LE héros
     Mythique      1 %    le héros, édition Mythique
     Divine        0,5 %  le héros, édition Divine (impossible à fabriquer)
 
 Règles :
-- les cartes viennent d'un catalogue commun : contenus populaires du moment
-  (renouvelés chaque jour) + contenus suivis par les joueurs. Pas besoin
-  d'avoir vu un contenu pour obtenir ses cartes ;
+- cartes de personnages uniquement (nom du personnage, jamais l'acteur) ;
+- catalogue commun : contenus populaires et mieux notés, titres phares de
+  chaque plateforme (renouvelés chaque jour), et contenus suivis par les
+  joueurs. Pas besoin d'avoir vu un contenu pour obtenir ses cartes ;
 - les contenus de VOTRE suivi ont deux fois plus de chances de sortir ;
-- on choisit le thème du booster : animes, films, séries ou mélange ;
+- packs au choix : animes, films, séries, mélange, ou par plateforme
+  (Netflix, Disney+, Prime Video…) ;
 - 5 cartes par booster, dont au moins une Rare (ou mieux) ;
 - filet de sécurité : après 19 boosters sans Épique ou mieux, le 20e en
   contient forcément une ;
@@ -26,17 +28,19 @@ Règles :
 - tout est tiré côté serveur, avec un générateur aléatoire non prévisible.
 """
 
+import hashlib
 import random
 import secrets
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Any
 
 import httpx
 import structlog
 from pydantic import TypeAdapter
-from sqlalchemy import func, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,7 +51,7 @@ from app.models import (
     CardKind,
     CardWallet,
     Content,
-    Episode,
+    ContentPlatform,
     Rarity,
     Tracking,
     UserCard,
@@ -105,6 +109,7 @@ ROLE_RARITY = {
     CharacterRole.HERO: Rarity.LEGENDARY,
     CharacterRole.MAIN: Rarity.EPIC,
     CharacterRole.SUPPORTING: Rarity.RARE,
+    CharacterRole.RECURRING: Rarity.UNCOMMON,
     CharacterRole.BACKGROUND: Rarity.COMMON,
 }
 # Texte affiché sous le nom du personnage (jamais l'acteur ni le doubleur).
@@ -112,9 +117,9 @@ ROLE_LABELS = {
     CharacterRole.HERO: "Héros",
     CharacterRole.MAIN: "Rôle principal",
     CharacterRole.SUPPORTING: "Second rôle",
+    CharacterRole.RECURRING: "Personnage récurrent",
     CharacterRole.BACKGROUND: "Personnage",
 }
-MAX_STILLS = 8  # images d'épisodes « ordinaires » par contenu
 CARDS_REFRESH = timedelta(days=1)
 CHARACTERS_CACHE_SECONDS = 7 * 24 * 3600
 
@@ -126,6 +131,16 @@ class PackTheme(StrEnum):
     MOVIE = "movie"
     SERIES = "series"
     MIXED = "mixed"
+    # Packs par plateforme (films et séries inclus dans l'abonnement, en France)
+    NETFLIX = "netflix"
+    DISNEY = "disney"
+    PRIME = "prime"
+    APPLE = "apple"
+    MAX = "max"
+    CANAL = "canal"
+    PARAMOUNT = "paramount"
+    CRUNCHYROLL = "crunchyroll"
+    ADN = "adn"
 
 
 THEME_LABELS = {
@@ -133,12 +148,48 @@ THEME_LABELS = {
     PackTheme.MOVIE: "Films",
     PackTheme.SERIES: "Séries",
     PackTheme.MIXED: "Mélange",
+    PackTheme.NETFLIX: "Netflix",
+    PackTheme.DISNEY: "Disney+",
+    PackTheme.PRIME: "Prime Video",
+    PackTheme.APPLE: "Apple TV+",
+    PackTheme.MAX: "HBO Max",
+    PackTheme.CANAL: "Canal+",
+    PackTheme.PARAMOUNT: "Paramount+",
+    PackTheme.CRUNCHYROLL: "Crunchyroll",
+    PackTheme.ADN: "ADN",
 }
+# Identifiant de chaque plateforme chez TMDB (données JustWatch).
+PLATFORM_IDS = {
+    PackTheme.NETFLIX: 8,
+    PackTheme.DISNEY: 337,
+    PackTheme.PRIME: 119,
+    PackTheme.APPLE: 350,
+    PackTheme.MAX: 1899,
+    PackTheme.CANAL: 381,
+    PackTheme.PARAMOUNT: 531,
+}
+# Plateformes d'animes : leur catalogue français vient de TMDB, et chaque titre
+# est retrouvé chez AniList (dessins des personnages, pas de doubleurs).
+ANIME_PLATFORM_IDS = {
+    PackTheme.CRUNCHYROLL: 283,
+    PackTheme.ADN: 415,
+}
+# Sites de streaming signalés par AniList → pack correspondant.
+ANILIST_SITES = {
+    "Crunchyroll": PackTheme.CRUNCHYROLL,
+    "Netflix": PackTheme.NETFLIX,
+    "Amazon Prime Video": PackTheme.PRIME,
+    "Disney Plus": PackTheme.DISNEY,
+    "Max": PackTheme.MAX,
+}
+PLATFORM_THEMES = [*PLATFORM_IDS, *ANIME_PLATFORM_IDS]
 THEME_KINDS = {
     PackTheme.ANIME: [ContentKind.ANIME],
     PackTheme.MOVIE: [ContentKind.MOVIE],
     PackTheme.SERIES: [ContentKind.SERIES],
     PackTheme.MIXED: list(ContentKind),
+    **{platform: list(ContentKind) for platform in PLATFORM_IDS},
+    **{platform: [ContentKind.ANIME] for platform in ANIME_PLATFORM_IDS},
 }
 
 
@@ -175,110 +226,48 @@ async def ensure_cards(
     providers: list[MetadataProvider],
     content: Content,
 ) -> None:
-    """Crée (ou met à jour) les cartes d'un contenu à partir de ses images."""
+    """Crée (ou met à jour) les cartes des personnages d'un contenu."""
+    provider = next((p for p in providers if p.source == content.source), None)
+    if provider is None:
+        return
+    kind = ContentKind(content.kind)
+    try:
+        characters = await catalog.cached(
+            f"characters:{content.source}:{content.kind}:{content.external_id}",
+            CHARACTERS_CACHE_SECONDS,
+            _characters_adapter,
+            lambda: provider.get_characters(http, kind, content.external_id),
+        )
+    except ProviderError:
+        # Source momentanément en panne : on réessaiera plus tard.
+        log.warning("cards.personnages_indisponibles", content_id=content.id)
+        return
+
     rows: list[dict[str, object]] = []
 
-    def add(
-        key: str, kind: CardKind, rarity: Rarity, title: str, subtitle: str, image: str | None
-    ) -> None:
-        if image:  # pas d'image : pas de carte (jamais de carte vide)
-            rows.append(
-                {
-                    "content_id": content.id,
-                    "source_key": key,
-                    "kind": kind,
-                    "rarity": rarity,
-                    "title": title[:200],
-                    "subtitle": subtitle[:200],
-                    "image_url": image,
-                }
-            )
-
-    add("poster", CardKind.POSTER, Rarity.COMMON, content.title, "Affiche", content.poster_url)
-    add(
-        "backdrop", CardKind.BACKDROP, Rarity.UNCOMMON, content.title, "Décor", content.backdrop_url
-    )
-
-    provider = next((p for p in providers if p.source == content.source), None)
-    characters: list[CharacterSummary] = []
-    complete = True  # False : à refaire plus tard (source momentanément en panne)
-    if provider is not None:
-        kind = ContentKind(content.kind)
-        try:
-            characters = await catalog.cached(
-                f"characters:{content.source}:{content.kind}:{content.external_id}",
-                CHARACTERS_CACHE_SECONDS,
-                _characters_adapter,
-                lambda: provider.get_characters(http, kind, content.external_id),
-            )
-        except ProviderError:
-            # On garde l'affiche et le décor ; les personnages viendront plus tard.
-            log.warning("cards.personnages_indisponibles", content_id=content.id)
-            complete = False
-    for character in characters:
-        key = f"char:{character.order}"
-        add(
-            key,
-            CardKind.CHARACTER,
-            ROLE_RARITY[character.role],
-            character.name,
-            ROLE_LABELS[character.role],
-            character.image_url,
+    def add(key: str, rarity: Rarity, character: CharacterSummary, subtitle: str) -> None:
+        rows.append(
+            {
+                "content_id": content.id,
+                "source_key": key,
+                "kind": CardKind.CHARACTER,
+                "rarity": rarity,
+                "title": character.name[:200],
+                "subtitle": subtitle,
+                "image_url": character.image_url,
+            }
         )
+
+    for character in characters:
+        # Clé stable : l'empreinte du nom. Si le casting change d'ordre, une
+        # carte déjà obtenue reste le même personnage.
+        digest = hashlib.sha1(character.name.lower().encode(), usedforsecurity=False)
+        key = f"char:{digest.hexdigest()[:16]}"
+        add(key, ROLE_RARITY[character.role], character, ROLE_LABELS[character.role])
         if character.role == CharacterRole.HERO:
             # Le héros existe aussi en éditions Mythique et Divine.
             for edition, label in ((Rarity.MYTHIC, "Mythique"), (Rarity.DIVINE, "Divine")):
-                add(
-                    f"{key}:{edition}",
-                    CardKind.CHARACTER,
-                    edition,
-                    character.name,
-                    f"Édition {label}",
-                    character.image_url,
-                )
-
-    # Images d'épisodes déjà copiés en base (saisons ouvertes au moins une fois).
-    episodes = list(
-        await session.scalars(
-            select(Episode)
-            .where(
-                Episode.content_id == content.id,
-                Episode.season_number > 0,
-                Episode.still_url.is_not(None),
-            )
-            .order_by(Episode.season_number, Episode.number)
-        )
-    )
-    if episodes:
-        premiere, finale = episodes[0], episodes[-1]
-        add(
-            f"still:{premiere.id}",
-            CardKind.STILL,
-            Rarity.RARE,
-            premiere.title or content.title,
-            f"S{premiere.season_number}·É{premiere.number} — premier épisode",
-            premiere.still_url,
-        )
-        if content.is_finished and finale is not premiere:
-            add(
-                f"still:{finale.id}",
-                CardKind.STILL,
-                Rarity.RARE,
-                finale.title or content.title,
-                f"S{finale.season_number}·É{finale.number} — dernier épisode",
-                finale.still_url,
-            )
-        ordinary = episodes[1:-1]
-        step = max(1, len(ordinary) // MAX_STILLS)  # répartis sur toute la série
-        for episode in ordinary[::step][:MAX_STILLS]:
-            add(
-                f"still:{episode.id}",
-                CardKind.STILL,
-                Rarity.UNCOMMON,
-                episode.title or content.title,
-                f"S{episode.season_number}·É{episode.number}",
-                episode.still_url,
-            )
+                add(f"{key}:{edition}", edition, character, f"Édition {label}")
 
     if rows:
         statement = insert(Card).values(rows)
@@ -293,8 +282,7 @@ async def ensure_cards(
                 },
             )
         )
-    if complete:
-        content.cards_generated_at = _now()
+    content.cards_generated_at = _now()
     await session.commit()
 
 
@@ -399,17 +387,31 @@ async def timer_status(session: AsyncSession, user_id: int) -> int | None:
 # --- Tirage --------------------------------------------------------------------
 
 
+def _in_theme[Q: Select[Any]](query: Q, theme: PackTheme) -> Q:
+    """Restreint une requête (qui joint déjà Content) aux cartes d'un pack."""
+    query = query.where(Content.kind.in_(THEME_KINDS[theme]))
+    if theme in PLATFORM_THEMES:
+        query = query.where(
+            Card.content_id.in_(
+                select(ContentPlatform.content_id).where(ContentPlatform.platform == theme)
+            )
+        )
+    return query
+
+
 async def available_pool(
     session: AsyncSession, user_id: int, theme: PackTheme
 ) -> list[tuple[int, Rarity]]:
     """Cartes du thème. Les contenus suivis apparaissent deux fois dans la
     liste : ils ont deux fois plus de chances de sortir."""
     tracked = select(Tracking.content_id).where(Tracking.user_id == user_id)
-    rows = await session.execute(
-        select(Card.id, Card.rarity, Card.content_id.in_(tracked))
-        .join(Content, Content.id == Card.content_id)
-        .where(Content.kind.in_(THEME_KINDS[theme]))
+    query = _in_theme(
+        select(Card.id, Card.rarity, Card.content_id.in_(tracked)).join(
+            Content, Content.id == Card.content_id
+        ),
+        theme,
     )
+    rows = await session.execute(query)
     pool: list[tuple[int, Rarity]] = []
     for card_id, rarity, is_tracked in rows.tuples():
         pool.extend([(card_id, Rarity(rarity))] * (TRACKED_WEIGHT if is_tracked else 1))
@@ -614,8 +616,22 @@ async def catalog_stats(
             )
         ).tuples()
     }
+    by_platform = {
+        platform: count
+        for platform, count in (
+            await session.execute(
+                select(ContentPlatform.platform, func.count())
+                .select_from(Card)
+                .join(ContentPlatform, ContentPlatform.content_id == Card.content_id)
+                .group_by(ContentPlatform.platform)
+            )
+        ).tuples()
+    }
     themes = {
-        theme: sum(by_kind.get(kind, 0) for kind in kinds) for theme, kinds in THEME_KINDS.items()
+        theme: by_platform.get(theme, 0)
+        if theme in PLATFORM_THEMES
+        else sum(by_kind.get(kind, 0) for kind in THEME_KINDS[theme])
+        for theme in PackTheme
     }
     return owned, totals, themes
 
@@ -653,3 +669,69 @@ async def craft(session: AsyncSession, user_id: int, card_id: int) -> tuple[Card
     session.add(UserCard(user_id=user_id, card_id=card_id))
     await session.commit()
     return card, content, wallet.fragments
+
+
+@dataclass
+class PackPage:
+    total: int  # cartes du pack
+    matching: int  # cartes correspondant aux filtres
+    by_rarity: dict[Rarity, int]
+    entries: list[CollectionEntry]
+
+
+async def pack_cards(
+    session: AsyncSession,
+    user_id: int,
+    theme: PackTheme,
+    rarity: Rarity | None = None,
+    search: str | None = None,
+    offset: int = 0,
+    limit: int = 60,
+) -> PackPage:
+    """Cartes qu'on peut obtenir dans un pack, de la plus rare à la plus commune."""
+    by_rarity = {
+        Rarity(r): n
+        for r, n in (
+            await session.execute(
+                _in_theme(
+                    select(Card.rarity, func.count())
+                    .select_from(Card)
+                    .join(Content, Content.id == Card.content_id),
+                    theme,
+                ).group_by(Card.rarity)
+            )
+        ).tuples()
+    }
+    query = _in_theme(select(Card, Content).join(Content, Content.id == Card.content_id), theme)
+    if rarity is not None:
+        query = query.where(Card.rarity == rarity)
+    if search:
+        # Les caractères spéciaux de LIKE (% et _) sont neutralisés.
+        pattern = "%" + search.replace("\\", "").replace("%", "\\%").replace("_", "\\_") + "%"
+        query = query.where(
+            or_(Card.title.ilike(pattern, escape="\\"), Content.title.ilike(pattern, escape="\\"))
+        )
+    matching = await session.scalar(select(func.count()).select_from(query.subquery()))
+    order = case({r.value: i for i, r in enumerate(RARITY_ORDER)}, value=Card.rarity)
+    rows = list(
+        (
+            await session.execute(
+                query.order_by(order.desc(), Content.title, Card.title, Card.id)
+                .offset(offset)
+                .limit(limit)
+            )
+        ).tuples()
+    )
+    owned = set(
+        await session.scalars(
+            select(UserCard.card_id).where(
+                UserCard.user_id == user_id, UserCard.card_id.in_([c.id for c, _ in rows])
+            )
+        )
+    )
+    return PackPage(
+        total=sum(by_rarity.values()),
+        matching=int(matching or 0),
+        by_rarity=by_rarity,
+        entries=[CollectionEntry(card=c, content=ct, owned=c.id in owned) for c, ct in rows],
+    )

@@ -5,6 +5,7 @@ Mention obligatoire (conditions d'utilisation) : l'application doit indiquer
 qu'elle utilise l'API TMDB sans être approuvée ni certifiée par TMDB.
 """
 
+import re
 from typing import Any
 
 import httpx
@@ -54,13 +55,18 @@ def _year(value: str | None) -> int | None:
     return parsed.year if parsed else None
 
 
-# Contenus populaires : 2 pages de 20 par type, renouvelées chaque jour.
-POPULAR_PAGES = 2
+# Catalogue de cartes : listes « populaires » et « mieux notés » (20 par page),
+# renouvelées chaque jour.
+CATALOG_LISTS = (("popular", 5), ("top_rated", 3))
+PLATFORM_PAGES = 3  # titres populaires par plateforme (Netflix, Disney+…)
 ANIMATION_GENRE = 16  # identifiant du genre « Animation » chez TMDB
 
-# On garde les 15 personnages les plus importants : au-delà, ce sont des
-# apparitions qui rempliraient la collection de cartes sans intérêt.
-MAX_CHARACTERS = 15
+VOICE_ROLE = re.compile(r"\((?:voice|voix)\)", re.IGNORECASE)
+UNCREDITED = re.compile(r"\s*\((?:uncredited|non crédité)\)", re.IGNORECASE)
+
+# On garde les 25 personnages les plus importants : au-delà, ce sont des
+# apparitions sans intérêt pour une collection.
+MAX_CHARACTERS = 25
 
 
 def _role_from_order(order: int) -> CharacterRole:
@@ -69,8 +75,10 @@ def _role_from_order(order: int) -> CharacterRole:
         return CharacterRole.HERO
     if order <= 3:
         return CharacterRole.MAIN
-    if order <= 9:
+    if order <= 7:
         return CharacterRole.SUPPORTING
+    if order <= 13:
+        return CharacterRole.RECURRING
     return CharacterRole.BACKGROUND
 
 
@@ -168,6 +176,11 @@ class TmdbProvider:
         for item in sorted(data.get("cast", []), key=lambda c: c.get("order", 999)):
             roles = item.get("roles") or [{}]
             name = (item.get("character") or roles[0].get("character") or "").strip()
+            # Rôle de doublage (film d'animation) : la photo serait celle du
+            # doubleur, pas du personnage. On l'ignore.
+            if VOICE_ROLE.search(name):
+                continue
+            name = UNCREDITED.sub("", name).strip()
             photo = item.get("profile_path")
             # Données manquantes (pas de nom de personnage ou pas de photo) :
             # pas de carte, plutôt qu'une carte vide.
@@ -187,39 +200,86 @@ class TmdbProvider:
                 break
         return characters
 
+    def _summary(self, item: dict[str, Any], kind: ContentKind) -> ContentDetail:
+        """Fiche simplifiée à partir d'un élément de liste TMDB."""
+        is_movie = kind == ContentKind.MOVIE
+        media = "movie" if is_movie else "tv"
+        return ContentDetail(
+            source=Source.TMDB,
+            kind=kind,
+            external_id=str(item["id"]),
+            title=item.get("title" if is_movie else "name") or "Sans titre",
+            original_title=item.get("original_title" if is_movie else "original_name"),
+            year=_year(item.get("release_date" if is_movie else "first_air_date")),
+            poster_url=_image(item.get("poster_path"), "w500"),
+            backdrop_url=_image(item.get("backdrop_path"), "w1280"),
+            overview=item.get("overview") or None,
+            source_url=f"https://www.themoviedb.org/{media}/{item['id']}",
+        )
+
+    @staticmethod
+    def _is_japanese_anime(item: dict[str, Any]) -> bool:
+        # Les animes japonais viennent d'AniList (pack « Animes ») : on les
+        # retire des séries TMDB pour éviter les doublons.
+        return ANIMATION_GENRE in item.get("genre_ids", []) and (
+            item.get("original_language") == "ja"
+        )
+
+    async def _list(
+        self,
+        http: httpx.AsyncClient,
+        kind: ContentKind,
+        path: str,
+        pages: int,
+        anime: bool = False,
+        **params: str,
+    ) -> list[ContentDetail]:
+        items: list[ContentDetail] = []
+        seen: set[int] = set()
+        for page in range(1, pages + 1):
+            data = await self._get(http, path, page=str(page), **params)
+            for item in data.get("results", []):
+                is_anime = self._is_japanese_anime(item)
+                # anime=True : uniquement les animes ; sinon, tout SAUF les animes.
+                if item.get("id") in seen or (kind == ContentKind.SERIES and is_anime != anime):
+                    continue
+                seen.add(item["id"])
+                items.append(self._summary(item, kind))
+            if page >= (data.get("total_pages") or 0):
+                break
+        return items
+
     async def get_popular(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
         if kind not in (ContentKind.MOVIE, ContentKind.SERIES):
             return []
-        is_movie = kind == ContentKind.MOVIE
-        path = "/movie/popular" if is_movie else "/tv/popular"
-        items: list[ContentDetail] = []
-        for page in range(1, POPULAR_PAGES + 1):
-            data = await self._get(http, path, page=str(page), region=self._region)
-            for item in data.get("results", []):
-                # Les animes japonais viennent d'AniList (pack « Animes ») :
-                # on les retire des séries TMDB pour éviter les doublons.
-                if (
-                    not is_movie
-                    and ANIMATION_GENRE in item.get("genre_ids", [])
-                    and (item.get("original_language") == "ja")
-                ):
-                    continue
-                title = item.get("title" if is_movie else "name") or "Sans titre"
-                items.append(
-                    ContentDetail(
-                        source=Source.TMDB,
-                        kind=kind,
-                        external_id=str(item["id"]),
-                        title=title,
-                        original_title=item.get("original_title" if is_movie else "original_name"),
-                        year=_year(item.get("release_date" if is_movie else "first_air_date")),
-                        poster_url=_image(item.get("poster_path"), "w500"),
-                        backdrop_url=_image(item.get("backdrop_path"), "w1280"),
-                        overview=item.get("overview") or None,
-                        source_url=f"https://www.themoviedb.org/{path.split('/')[1]}/{item['id']}",
-                    )
-                )
-        return items
+        media = "movie" if kind == ContentKind.MOVIE else "tv"
+        items: dict[str, ContentDetail] = {}
+        for name, pages in CATALOG_LISTS:
+            for item in await self._list(
+                http, kind, f"/{media}/{name}", pages, region=self._region
+            ):
+                items.setdefault(item.external_id, item)
+        return list(items.values())
+
+    async def get_platform_titles(
+        self, http: httpx.AsyncClient, kind: ContentKind, provider_id: int, anime: bool = False
+    ) -> list[ContentDetail]:
+        """Titres populaires inclus dans l'abonnement d'une plateforme, en France.
+        anime=True : uniquement les séries d'animation japonaises."""
+        media = "movie" if kind == ContentKind.MOVIE else "tv"
+        return await self._list(
+            http,
+            kind,
+            f"/discover/{media}",
+            PLATFORM_PAGES,
+            anime,
+            watch_region=self._region,
+            with_watch_providers=str(provider_id),
+            with_watch_monetization_types="flatrate",
+            sort_by="popularity.desc",
+            # Au moins 100 votes : des titres connus, pas des inconnus du catalogue.
+            **{"vote_count.gte": "100"},
+        )
 
     def _watch(self, data: dict[str, Any], title: str) -> WatchAvailability:
         """Plateformes disponibles dans le pays choisi.

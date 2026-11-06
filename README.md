@@ -9,8 +9,9 @@ collectionner.
 > suivi (statut, note, avis), épisodes cochés un par un avec progression, et
 > bibliothèques personnelles colorées (grille, étagère ou liste ; tri au choix) ;
 > points d'expérience, niveaux, bonus (série de jours, Jour J, marathon) et succès ;
-> cartes à collectionner (7 raretés, de Commune à Divine) en boosters par thème
-> (animes, films, séries), catalogue de contenus populaires mis à jour chaque jour.
+> cartes de personnages à collectionner (7 raretés, de Commune à Divine) en boosters
+> par genre (animes, films, séries) ou par plateforme (Netflix, Disney+, Prime Video,
+> Crunchyroll, ADN…), catalogue mis à jour chaque jour.
 
 ---
 
