@@ -110,7 +110,12 @@ async def _cards(
         content.cards_generated_at > datetime.now(UTC) - CARDS_REFRESH
     ):
         return
-    await ensure_cards(session, http, providers, content)
+    try:
+        await ensure_cards(session, http, providers, content)
+    except Exception:
+        # Un contenu qui pose problème ne doit pas bloquer tout le catalogue.
+        log.exception("catalogue.contenu_en_erreur", content_id=content.id)
+        await session.rollback()
     await asyncio.sleep(PAUSE_SECONDS.get(Source(content.source), 1.0))
 
 

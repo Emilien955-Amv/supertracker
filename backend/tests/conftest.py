@@ -198,6 +198,7 @@ class FausseSource:
             ("Oracle", CharacterRole.SUPPORTING),
             ("Tank", CharacterRole.RECURRING),
             ("Figurant", CharacterRole.BACKGROUND),
+            ("Figurant", CharacterRole.BACKGROUND),  # même nom : une seule carte
         ]
         return [
             CharacterSummary(

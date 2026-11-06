@@ -244,8 +244,14 @@ async def ensure_cards(
         return
 
     rows: list[dict[str, object]] = []
+    keys: set[str] = set()
 
     def add(key: str, rarity: Rarity, character: CharacterSummary, subtitle: str) -> None:
+        # Deux personnages du même nom (ex. « Soldat ») : on garde le premier,
+        # le plus important. Sinon la base refuserait deux cartes identiques.
+        if key in keys:
+            return
+        keys.add(key)
         rows.append(
             {
                 "content_id": content.id,
