@@ -108,6 +108,7 @@ export type PackContents = {
 
 export type BoosterOpened = {
   theme: PackTheme;
+  boosters_opened: number;
   cards: { card: CardRead; is_new: boolean; fragments: number }[];
   fragments: number;
   boosters_left: number;

@@ -35,6 +35,7 @@ export default function CardsPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [rarity, setRarity] = useState<Rarity | null>(null);
+  const [byTen, setByTen] = useState(false); // ouvrir 10 boosters d'un coup
 
   if (state.status === "idle" || state.status === "loading") {
     return <main className="mx-auto max-w-3xl px-5 pt-8 text-muted">Chargement…</main>;
@@ -61,7 +62,7 @@ export default function CardsPage() {
       setOpened(
         await apiFetch<BoosterOpened>("/api/cards/boosters/open", {
           method: "POST",
-          body: { theme },
+          body: { theme, count: byTen ? 10 : 1 },
         }),
       );
     } catch (err) {
@@ -120,6 +121,17 @@ export default function CardsPage() {
 
         {collection.boosters > 0 && (
           <>
+            {collection.boosters > 1 && (
+              <label className="mt-4 flex items-center justify-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={byTen}
+                  onChange={(e) => setByTen(e.target.checked)}
+                  className="h-5 w-5 accent-accent"
+                />
+                Ouvrir par 10 (50 cartes d'un coup)
+              </label>
+            )}
             <p className="mt-4 text-center text-sm text-muted">Choisissez votre pack :</p>
             <h3 className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Par genre</h3>
             <ul className="mt-2 grid grid-cols-2 gap-2">

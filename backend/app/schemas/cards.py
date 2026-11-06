@@ -1,6 +1,6 @@
 """Formats d'échange des cartes."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models import Card, CardKind, Content, Rarity
 from app.providers.base import ContentKind, Source
@@ -77,6 +77,7 @@ class CollectionRead(BaseModel):
 
 class OpenRequest(BaseModel):
     theme: PackTheme = PackTheme.MIXED
+    count: int = Field(default=1, ge=1, le=10, description="Boosters à ouvrir d'un coup")
 
 
 class DrawnCardRead(BaseModel):
@@ -87,6 +88,7 @@ class DrawnCardRead(BaseModel):
 
 class BoosterOpened(BaseModel):
     theme: PackTheme
+    boosters_opened: int = 1
     cards: list[DrawnCardRead]
     fragments: int
     boosters_left: int

@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     search_cache_seconds: int = 3600  # 1 h : les résultats bougent peu
     detail_cache_seconds: int = 86400  # 24 h : une fiche change rarement
 
+    # Base dédiée aux tests (en local) : les tests ne touchent jamais aux
+    # données de développement, ni à la tâche qui remplit le catalogue de cartes.
+    test_database_url: str = ""
+
+    @model_validator(mode="after")
+    def _base_de_test(self) -> "Settings":
+        if self.environment == "test" and self.test_database_url:
+            self.database_url = self.test_database_url
+        return self
+
     @model_validator(mode="after")
     def _verifier_secrets(self) -> "Settings":
         if self.environment in ("staging", "production"):

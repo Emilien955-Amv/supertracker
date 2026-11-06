@@ -1,7 +1,7 @@
 """Suivi d'un contenu : statut, note, avis, épisodes vus et progression."""
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import Subquery, and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
@@ -27,6 +27,10 @@ class Progress:
         if not self.total:
             return None
         return min(100, round(100 * self.watched / self.total))
+
+
+def _today() -> date:
+    return gamification.today()
 
 
 def _now() -> datetime:
@@ -235,6 +239,7 @@ async def episodes_until(
     season_number: int,
     episode_number: int,
     watched: bool,
+    aired_only: bool = False,
 ) -> list[int]:
     """Épisodes à modifier pour « vu jusqu'ici » ou « pas vu à partir d'ici ».
 
@@ -261,6 +266,8 @@ async def episodes_until(
         position,
         Episode.id.in_(seen) if not watched else Episode.id.not_in(seen),
     )
+    if aired_only:  # seulement les épisodes déjà diffusés
+        query = query.where(or_(Episode.air_date.is_(None), Episode.air_date <= _today()))
     return list(await session.scalars(query))
 
 

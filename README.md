@@ -60,10 +60,18 @@ Pour tout effacer, **y compris la base de données** : `docker compose down -v`.
 
 ## 3. Lancer les tests
 
-Pendant que `docker compose up` tourne, dans un **second** terminal :
+Pendant que `docker compose up` tourne, dans un **second** terminal.
+
+Les tests utilisent une base à part (`supertracker_test`), à créer **une seule fois** :
 
 ```bash
-docker compose exec -e ENVIRONMENT=test api pytest --cov
+docker compose exec db createdb -U supertracker supertracker_test
+```
+
+Puis, à chaque fois (la mise à jour de la base de test est incluse) :
+
+```bash
+docker compose exec -e ENVIRONMENT=test api sh -c "alembic upgrade head && pytest --cov"
 docker compose exec api ruff check .
 docker compose exec api mypy app
 docker compose exec web npm test

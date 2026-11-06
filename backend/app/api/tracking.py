@@ -127,7 +127,49 @@ async def save_tracking(
     _, rewards = await tracking_service.save_tracking(
         session, user.id, content, body.status, body.rating, body.review or None
     )
-    return await _state(session, user.id, content, rewards)
+    changed: list[int] = []
+    if body.status == TrackingStatus.COMPLETED and kind != ContentKind.MOVIE:
+        # « Terminé » : tous les épisodes déjà diffusés sont cochés.
+        last = await _sync_seasons(session, http, providers, content, source, kind, external_id)
+        ids = await tracking_service.episodes_until(
+            session, user.id, content, last, 1_000_000, watched=True, aired_only=True
+        )
+        if ids:
+            _, more, changed = await tracking_service.set_episodes_watched(
+                session, user.id, content, ids, True
+            )
+            rewards = rewards.merge(more)
+    state = await _state(session, user.id, content, rewards)
+    return state.model_copy(update={"changed_episode_ids": changed})
+
+
+async def _sync_seasons(
+    session: SessionDep,
+    http: HttpDep,
+    providers: ProvidersDep,
+    content: Content,
+    source: Source,
+    kind: ContentKind,
+    external_id: str,
+    up_to: int | None = None,
+) -> int:
+    """Copie les épisodes des saisons 1 à « up_to » (toutes par défaut) depuis
+    la source. Renvoie le numéro de la dernière saison copiée."""
+    try:
+        detail = await catalog.get_detail(http, providers, source, kind, external_id)
+        numbers = sorted(
+            s.number
+            for s in (detail.seasons if detail else [])
+            if s.number > 0 and (up_to is None or s.number <= up_to)
+        )
+        for number in numbers:
+            await content_service.ensure_season(session, http, providers, content, number)
+    except (ProviderError, content_service.ContentNotFoundError):
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "La source de données ne répond pas. Réessayez dans un instant.",
+        ) from None
+    return numbers[-1] if numbers else 0
 
 
 @router.delete(CONTENT_PATH, status_code=status.HTTP_204_NO_CONTENT, summary="Retirer de mon suivi")
@@ -227,16 +269,9 @@ async def mark_until(
     if body.watched:
         # Les saisons précédentes n'ont peut-être jamais été ouvertes : on
         # copie leurs épisodes depuis la source avant de les cocher.
-        try:
-            detail = await catalog.get_detail(http, providers, source, kind, external_id)
-            numbers = [s.number for s in (detail.seasons if detail else [])]
-            for number in sorted(n for n in numbers if 0 < n <= body.season_number):
-                await content_service.ensure_season(session, http, providers, content, number)
-        except (ProviderError, content_service.ContentNotFoundError):
-            raise HTTPException(
-                status.HTTP_502_BAD_GATEWAY,
-                "La source de données ne répond pas. Réessayez dans un instant.",
-            ) from None
+        await _sync_seasons(
+            session, http, providers, content, source, kind, external_id, body.season_number
+        )
     ids = await tracking_service.episodes_until(
         session, user.id, content, body.season_number, body.episode_number, body.watched
     )

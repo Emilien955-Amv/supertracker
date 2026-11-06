@@ -82,7 +82,7 @@ export function BoosterReveal({ booster, onClose, onNext }: Props) {
 
       <div className="relative mx-auto max-w-3xl">
         <h2 id="booster-titre" ref={title} tabIndex={-1} className="text-center text-2xl font-bold outline-none">
-          🎁 Votre booster
+          🎁 {booster.boosters_opened > 1 ? `Vos ${booster.boosters_opened} boosters` : "Votre booster"}
         </h2>
         <p className="mt-1 text-center text-sm text-muted" aria-live="polite">
           {suspense
@@ -160,7 +160,8 @@ export function BoosterReveal({ booster, onClose, onNext }: Props) {
               onClick={onNext}
               className="rounded-xl bg-accent px-4 py-2 font-semibold text-white"
             >
-              Ouvrir le suivant ({booster.boosters_left})
+              Ouvrir {booster.boosters_opened > 1 ? "les suivants" : "le suivant"} (
+              {booster.boosters_left} restant{booster.boosters_left > 1 ? "s" : ""})
             </button>
           )}
           <button

@@ -183,3 +183,15 @@ async def test_vu_jusqu_ici_coche_aussi_les_saisons_precedentes(
 async def test_vu_jusqu_ici_refuse_pour_un_film(db_client: AsyncClient, contexte: Contexte) -> None:
     corps = {"season_number": 1, "episode_number": 1, "watched": True}
     assert (await db_client.post(f"{FILM}/watched-until", json=corps)).status_code == 404
+
+
+async def test_termine_coche_tous_les_episodes_diffuses(
+    db_client: AsyncClient, contexte: Contexte
+) -> None:
+    etat = (await db_client.put(SERIE, json={"status": "completed"})).json()
+
+    assert etat["tracking"]["status"] == "completed"
+    assert etat["progress"] == {"watched": 3, "total": 3, "percent": 100}
+    assert len(etat["changed_episode_ids"]) == 3  # saisons 1 et 2, pas l'épisode spécial
+    assert etat["rewards"]["boosters"] >= 3  # un par épisode
+    assert not any(e["watched"] for e in await episodes(db_client, 0))

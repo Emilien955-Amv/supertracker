@@ -111,6 +111,17 @@ class Rewards:
     def xp(self) -> int:
         return sum(self.gains.values())
 
+    def merge(self, other: "Rewards") -> "Rewards":
+        """Additionne deux récompenses (ex. changement de statut + épisodes cochés)."""
+        return Rewards(
+            gains=self.gains + other.gains,
+            badges=self.badges + other.badges,
+            level_before=self.level_before,
+            level_after=max(self.level_after, other.level_after),
+            streak_days=max(self.streak_days, other.streak_days),
+            boosters=self.boosters + other.boosters,
+        )
+
     @property
     def is_empty(self) -> bool:
         return not self.gains and not self.badges and not self.boosters
@@ -343,10 +354,10 @@ async def on_episodes_changed(
             amount = min(round(EPISODE_XP * multiplier), remaining)
             gained = await game.award(f"episode:{episode.id}", XpKind.EPISODE, amount, content.id)
             remaining -= gained
-            if gained:
-                # Un booster par épisode vu, s'il a rapporté des XP : le plafond
-                # quotidien et les clés uniques empêchent d'en abuser.
-                await game.booster(f"episode:{episode.id}")
+            # Un booster par épisode vu, même au-delà du plafond d'XP. La clé
+            # unique empêche d'en obtenir deux pour le même épisode (cocher /
+            # décocher en boucle ne rapporte rien).
+            await game.booster(f"episode:{episode.id}")
             if episode.air_date is not None and episode.air_date >= day - timedelta(days=1):
                 await game.award(f"jour_j:{episode.id}", XpKind.JOUR_J, JOUR_J_XP, content.id)
 

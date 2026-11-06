@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 
 import { Attribution } from "../components/Attribution";
@@ -22,6 +23,9 @@ export default function ContentPage() {
   const apiPath = trackingPath(ref);
   // Où en est l'utilisateur : chargé en parallèle de la fiche.
   const [tracking, setTracking] = useApiResource<ContentState>(apiPath);
+  // Incrémenté quand le statut coche des épisodes (« Terminé ») : les saisons
+  // affichées se mettent à jour.
+  const [episodesVersion, setEpisodesVersion] = useState(0);
 
   const back = (
     <button
@@ -106,7 +110,10 @@ export default function ContentPage() {
             <TrackingPanel
               path={apiPath}
               state={tracking.data}
-              onChange={setTracking}
+              onChange={(next) => {
+                setTracking(next);
+                if (next.changed_episode_ids?.length) setEpisodesVersion((v) => v + 1);
+              }}
               isMovie={content.kind === "movie"}
             />
             <LibraryPicker
@@ -151,7 +158,12 @@ export default function ContentPage() {
         {content.watch && <WatchProviders watch={content.watch} />}
 
         {content.seasons.length > 0 && (
-          <SeasonsTracker path={apiPath} seasons={content.seasons} onStateChange={setTracking} />
+          <SeasonsTracker
+            path={apiPath}
+            seasons={content.seasons}
+            onStateChange={setTracking}
+            refreshKey={episodesVersion}
+          />
         )}
 
         <a

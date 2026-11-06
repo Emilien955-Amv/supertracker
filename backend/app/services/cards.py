@@ -52,6 +52,8 @@ from app.models import (
     CardWallet,
     Content,
     ContentPlatform,
+    Episode,
+    EpisodeView,
     Rarity,
     Tracking,
     UserCard,
@@ -356,6 +358,21 @@ async def _waiting_timer_boosters(session: AsyncSession, user_id: int) -> int:
 async def sync_boosters(session: AsyncSession, user_id: int, now: datetime | None = None) -> None:
     """Distribue les boosters dus : bienvenue, rattrapage des niveaux, minuteur."""
     await gamification.grant_booster(session, user_id, "welcome")
+    # Un booster par épisode diffusé déjà coché (rattrapage, une seule fois :
+    # la clé « episode:<id> » est unique).
+    await session.execute(
+        insert(Booster)
+        .from_select(
+            ["user_id", "key"],
+            select(EpisodeView.user_id, func.concat("episode:", EpisodeView.episode_id))
+            .join(Episode, Episode.id == EpisodeView.episode_id)
+            .where(
+                EpisodeView.user_id == user_id,
+                or_(Episode.air_date.is_(None), Episode.air_date <= gamification.today()),
+            ),
+        )
+        .on_conflict_do_nothing(index_elements=["user_id", "key"])
+    )
     level = gamification.level_for_xp(await gamification.total_xp(session, user_id))
     for lvl in range(2, level + 1):
         await gamification.grant_booster(session, user_id, f"level:{lvl}")

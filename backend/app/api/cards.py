@@ -110,29 +110,36 @@ async def open_booster(
     body: OpenRequest | None = None,
 ) -> BoosterOpened:
     await enforce_rate_limit(f"booster:{user.id}", limit=60, window_seconds=60)
-    theme = body.theme if body else service.PackTheme.MIXED
+    request = body or OpenRequest()
     await service.sync_boosters(session, user.id)
+    results: list[service.OpenResult] = []
     try:
-        result = await service.open_booster(session, http, providers, user.id, theme)
+        for _ in range(request.count):
+            results.append(
+                await service.open_booster(session, http, providers, user.id, request.theme)
+            )
     except service.NoBoosterError:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "Vous n'avez aucun booster à ouvrir."
-        ) from None
+        if not results:  # plus de booster en cours de route : on garde ceux ouverts
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Vous n'avez aucun booster à ouvrir."
+            ) from None
     except service.EmptyPoolError:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Les cartes de ce thème sont en préparation. Réessayez dans quelques minutes.",
         ) from None
     return BoosterOpened(
-        theme=result.theme,
+        theme=request.theme,
+        boosters_opened=len(results),
         cards=[
             DrawnCardRead(
                 card=CardRead.of(d.card, d.content), is_new=d.is_new, fragments=d.fragments
             )
+            for result in results
             for d in result.cards
         ],
-        fragments=result.fragments,
-        boosters_left=result.boosters_left,
+        fragments=results[-1].fragments,
+        boosters_left=results[-1].boosters_left,
     )
 
 

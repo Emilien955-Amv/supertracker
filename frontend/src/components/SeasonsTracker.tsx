@@ -14,6 +14,8 @@ type Props = {
   path: string;
   seasons: SeasonSummary[];
   onStateChange: (state: ContentState) => void;
+  /** Change quand les épisodes ont été modifiés ailleurs (ex. statut « Terminé »). */
+  refreshKey?: number;
 };
 
 /** Dernière action, pour pouvoir l'annuler (erreur de clic). */
@@ -21,13 +23,17 @@ type Undo = { ids: number[]; watched: boolean };
 const UNDO_MS = 10_000;
 
 /** Liste des saisons ; chacune se déplie pour cocher ses épisodes. */
-export function SeasonsTracker({ path, seasons, onStateChange }: Props) {
+export function SeasonsTracker({ path, seasons, onStateChange, refreshKey = 0 }: Props) {
   // Incrémenté après une action sur plusieurs saisons : les saisons ouvertes
   // se rechargent pour afficher les bonnes cases.
   const [version, setVersion] = useState(0);
   const [undo, setUndo] = useState<Undo | null>(null);
   const [undoError, setUndoError] = useState<string | null>(null);
   const firstSeason = Math.min(...seasons.map((s) => s.number).filter((n) => n > 0));
+
+  useEffect(() => {
+    if (refreshKey > 0) setVersion((v) => v + 1);
+  }, [refreshKey]);
 
   useEffect(() => {
     if (!undo) return;

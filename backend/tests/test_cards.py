@@ -7,11 +7,12 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
+from sqlalchemy import delete, update
 
-from app.models import CardWallet, Rarity
+from app.models import Booster, CardWallet, Rarity, XpEvent
 from app.services import card_catalog, cards, gamification
 from app.services.cards import EPIC_OR_BETTER, RARE_OR_BETTER, PackTheme, draw
+from app.services.gamification import today
 from tests.conftest import Contexte
 
 FILM = "/api/tracking/tmdb/movie/603"
@@ -298,3 +299,56 @@ async def test_liste_des_cartes_d_un_pack(db_client: AsyncClient, contexte: Cont
     ).json()
     assert len(page2["cards"]) == 2
     assert (await db_client.get("/api/cards/packs/inconnu")).status_code == 422
+
+
+@pytest.mark.integration
+async def test_booster_par_episode_meme_au_dela_du_plafond_d_xp(
+    db_client: AsyncClient, contexte: Contexte
+) -> None:
+    # Plafond quotidien d'XP déjà atteint (gros rattrapage plus tôt dans la journée).
+    contexte.session.add(
+        XpEvent(user_id=contexte.alice.id, key="deja", kind="episode", amount=300, day=today())
+    )
+    await contexte.session.commit()
+
+    ids = [e["id"] for e in (await db_client.get(f"{SERIE}/seasons/1")).json()]
+    etat = (
+        await db_client.post(f"{SERIE}/episodes", json={"episode_ids": ids, "watched": True})
+    ).json()
+    assert "Épisodes vus" not in {line["label"] for line in etat["rewards"]["lines"]}
+    assert etat["rewards"]["boosters"] == 2  # pas d'XP, mais bien 2 boosters
+
+
+@pytest.mark.integration
+async def test_rattrapage_des_boosters_d_episodes(
+    db_client: AsyncClient, contexte: Contexte
+) -> None:
+    ids = [e["id"] for e in (await db_client.get(f"{SERIE}/seasons/1")).json()]
+    await db_client.post(f"{SERIE}/episodes", json={"episode_ids": ids, "watched": True})
+    # Simule des épisodes cochés avant la règle « un booster par épisode ».
+    await contexte.session.execute(
+        delete(Booster).where(Booster.user_id == contexte.alice.id, Booster.key.like("episode:%"))
+    )
+    await contexte.session.commit()
+
+    assert (await collection(db_client))["boosters"] == 1 + 2  # bienvenue + 2 épisodes
+
+
+@pytest.mark.integration
+async def test_ouvrir_plusieurs_boosters_d_un_coup(
+    db_client: AsyncClient, contexte: Contexte
+) -> None:
+    await db_client.put(FILM, json={"status": "watching"})
+    await collection(db_client)
+    await offrir_boosters(contexte, 3)  # 4 boosters avec celui de bienvenue
+
+    response = await db_client.post(
+        "/api/cards/boosters/open", json={"theme": "movie", "count": 10}
+    )
+    assert response.status_code == 200
+    resultat = response.json()
+    assert resultat["boosters_opened"] == 4  # on s'arrête quand il n'y en a plus
+    assert len(resultat["cards"]) == 20
+    assert resultat["boosters_left"] == 0
+    response = await db_client.post("/api/cards/boosters/open", json={"count": 11})
+    assert response.status_code == 422  # 10 au maximum
