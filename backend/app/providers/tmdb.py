@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from app.providers import disney
 from app.providers.base import (
     CharacterRole,
     CharacterSummary,
@@ -58,7 +59,7 @@ def _year(value: str | None) -> int | None:
 # Catalogue de cartes : listes « populaires » et « mieux notés » (20 par page),
 # renouvelées chaque jour.
 CATALOG_LISTS = (("popular", 5), ("top_rated", 3))
-PLATFORM_PAGES = 3  # titres populaires par plateforme (Netflix, Disney+…)
+PLATFORM_PAGES = 5  # titres populaires par plateforme (Netflix, Disney+…)
 ANIMATION_GENRE = 16  # identifiant du genre « Animation » chez TMDB
 
 VOICE_ROLE = re.compile(r"\((?:voice|voix)\)", re.IGNORECASE)
@@ -184,8 +185,11 @@ class TmdbProvider:
         # Anime japonais : ses cartes viennent d'AniList (dessins des personnages).
         # Ici, les photos seraient celles des doubleurs.
         genre_ids = [genre.get("id") for genre in data.get("genres", [])]
-        if ANIMATION_GENRE in genre_ids and data.get("original_language") == "ja":
-            return []
+        if ANIMATION_GENRE in genre_ids:
+            if data.get("original_language") == "ja":
+                return []
+            # Animation occidentale (Disney…) : les dessins viennent de la Disney API.
+            return await self._cartoon_characters(http, data, cast, kind)
         characters: list[CharacterSummary] = []
         for item in sorted(cast, key=lambda c: c.get("order", 999)):
             roles = item.get("roles") or [{}]
@@ -213,6 +217,34 @@ class TmdbProvider:
             if len(characters) >= MAX_CHARACTERS:
                 break
         return characters
+
+    async def _cartoon_characters(
+        self,
+        http: httpx.AsyncClient,
+        data: dict[str, Any],
+        cast: list[dict[str, Any]],
+        kind: ContentKind,
+    ) -> list[CharacterSummary]:
+        is_movie = kind == ContentKind.MOVIE
+        title = (
+            data.get("original_title" if is_movie else "original_name")
+            or data.get("title" if is_movie else "name")
+            or ""
+        )
+        voices = [
+            item.get("character") or (item.get("roles") or [{}])[0].get("character") or ""
+            for item in sorted(cast, key=lambda c: c.get("order", 999))
+        ]
+        found = disney.ranked(await disney.characters_of(http, title, is_movie), voices)
+        return [
+            CharacterSummary(
+                name=item["name"][:200],
+                image_url=item["imageUrl"],
+                role=_role_from_order(order),
+                order=order,
+            )
+            for order, item in enumerate(found[:MAX_CHARACTERS])
+        ]
 
     def _summary(self, item: dict[str, Any], kind: ContentKind) -> ContentDetail:
         """Fiche simplifiée à partir d'un élément de liste TMDB."""

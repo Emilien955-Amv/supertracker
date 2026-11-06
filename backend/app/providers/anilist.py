@@ -5,6 +5,7 @@ on envoie une requête décrivant exactement les champs voulus.
 Documentation : https://docs.anilist.co
 """
 
+import asyncio
 import re
 from datetime import date
 from typing import Any
@@ -76,7 +77,7 @@ ANILIST_ROLES = {
     "SUPPORTING": CharacterRole.SUPPORTING,
     "BACKGROUND": CharacterRole.BACKGROUND,
 }
-MAX_CHARACTERS = 100  # le plus possible : 4 pages de 25
+MAX_CHARACTERS = 300  # le plus possible : jusqu'à 12 pages de 25
 POPULAR_PAGES = 4  # 4 × 50 animes les plus populaires (avant regroupement)
 MAX_SEASONS = 20
 # Seconds rôles : les 6 premiers sont Rares, les 15 suivants « récurrents ».
@@ -251,10 +252,17 @@ class AniListProvider:
     async def _query(
         self, http: httpx.AsyncClient, query: str, variables: dict[str, Any]
     ) -> dict[str, Any]:
-        try:
-            response = await http.post(API_URL, json={"query": query, "variables": variables})
-        except httpx.HTTPError as exc:
-            raise ProviderError(f"AniList injoignable : {exc}") from exc
+        for attempt in range(3):
+            try:
+                response = await http.post(API_URL, json={"query": query, "variables": variables})
+            except httpx.HTTPError as exc:
+                raise ProviderError(f"AniList injoignable : {exc}") from exc
+            # 429 : AniList demande de ralentir. On attend le délai indiqué
+            # (au plus une minute) puis on réessaie, deux fois au maximum.
+            if response.status_code != 429 or attempt == 2:
+                break
+            delay = min(60, int(response.headers.get("Retry-After", "10") or 10))
+            await asyncio.sleep(delay)
         if response.status_code == 404:
             return {}
         if response.status_code != 200:
