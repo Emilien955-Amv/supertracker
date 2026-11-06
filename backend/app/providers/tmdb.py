@@ -64,9 +64,8 @@ ANIMATION_GENRE = 16  # identifiant du genre « Animation » chez TMDB
 VOICE_ROLE = re.compile(r"\((?:voice|voix)\)", re.IGNORECASE)
 UNCREDITED = re.compile(r"\s*\((?:uncredited|non crédité)\)", re.IGNORECASE)
 
-# On garde les 25 personnages les plus importants : au-delà, ce sont des
-# apparitions sans intérêt pour une collection.
-MAX_CHARACTERS = 25
+# Le plus de personnages possible (au-delà de 100, ce sont des figurants).
+MAX_CHARACTERS = 100
 
 
 def _role_from_order(order: int) -> CharacterRole:
@@ -75,9 +74,9 @@ def _role_from_order(order: int) -> CharacterRole:
         return CharacterRole.HERO
     if order <= 3:
         return CharacterRole.MAIN
-    if order <= 7:
+    if order <= 9:
         return CharacterRole.SUPPORTING
-    if order <= 13:
+    if order <= 24:
         return CharacterRole.RECURRING
     return CharacterRole.BACKGROUND
 
@@ -113,6 +112,11 @@ class TmdbProvider:
             media_type = item.get("media_type")
             if media_type not in ("movie", "tv"):
                 continue  # on ignore les personnes (acteurs, réalisateurs)
+            if self._is_japanese_anime(item):
+                continue  # les animes japonais viennent d'AniList : pas de doublon
+            date_key = "release_date" if media_type == "movie" else "first_air_date"
+            if not item.get(date_key) and not item.get("poster_path"):
+                continue  # fiche incomplète (ni date ni affiche) : souvent un doublon
             is_movie = media_type == "movie"
             results.append(
                 SearchResult(
@@ -165,15 +169,25 @@ class TmdbProvider:
     async def get_characters(
         self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
     ) -> list[CharacterSummary]:
-        # Pour une série, « aggregate_credits » regroupe toutes les saisons.
+        # Fiche + casting en un seul appel. Pour une série, « aggregate_credits »
+        # regroupe toutes les saisons.
         if kind == ContentKind.MOVIE:
-            data = await self._get(http, f"/movie/{external_id}/credits")
+            data = await self._get(http, f"/movie/{external_id}", append_to_response="credits")
+            cast = (data.get("credits") or {}).get("cast", [])
         elif kind == ContentKind.SERIES:
-            data = await self._get(http, f"/tv/{external_id}/aggregate_credits")
+            data = await self._get(
+                http, f"/tv/{external_id}", append_to_response="aggregate_credits"
+            )
+            cast = (data.get("aggregate_credits") or {}).get("cast", [])
         else:
             return []
+        # Anime japonais : ses cartes viennent d'AniList (dessins des personnages).
+        # Ici, les photos seraient celles des doubleurs.
+        genre_ids = [genre.get("id") for genre in data.get("genres", [])]
+        if ANIMATION_GENRE in genre_ids and data.get("original_language") == "ja":
+            return []
         characters: list[CharacterSummary] = []
-        for item in sorted(data.get("cast", []), key=lambda c: c.get("order", 999)):
+        for item in sorted(cast, key=lambda c: c.get("order", 999)):
             roles = item.get("roles") or [{}]
             name = (item.get("character") or roles[0].get("character") or "").strip()
             # Rôle de doublage (film d'animation) : la photo serait celle du
@@ -241,7 +255,7 @@ class TmdbProvider:
             for item in data.get("results", []):
                 is_anime = self._is_japanese_anime(item)
                 # anime=True : uniquement les animes ; sinon, tout SAUF les animes.
-                if item.get("id") in seen or (kind == ContentKind.SERIES and is_anime != anime):
+                if item.get("id") in seen or is_anime != anime:
                     continue
                 seen.add(item["id"])
                 items.append(self._summary(item, kind))

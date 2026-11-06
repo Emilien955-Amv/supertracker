@@ -338,18 +338,19 @@ async def test_tmdb_personnages_classes_par_importance() -> None:
         ]
         + [
             {"order": 10 + i, "character": f"Rôle {i}", "name": "Y", "profile_path": f"/{i}.jpg"}
-            for i in range(30)
+            for i in range(120)
         ]
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/3/movie/603/credits"
-        return httpx.Response(200, json=casting)
+        assert request.url.path == "/3/movie/603"
+        assert request.url.params["append_to_response"] == "credits"
+        return httpx.Response(200, json={"genres": [], "credits": casting})
 
     async with faux_client(handler) as http:
         persos = await TmdbProvider("jeton").get_characters(http, ContentKind.MOVIE, "603")
 
-    assert len(persos) == 25  # les 25 plus importants seulement
+    assert len(persos) == 100  # le plus possible, dans la limite de 100
     assert (persos[0].name, persos[0].role) == ("Neo", CharacterRole.HERO)
     assert persos[0].image_url == "https://image.tmdb.org/t/p/h632/n.jpg"
     assert (persos[1].name, persos[1].role) == ("Morpheus", CharacterRole.MAIN)
@@ -410,3 +411,103 @@ async def test_tmdb_titres_d_une_plateforme_sans_les_animes() -> None:
     params = requetes[0].url.params
     assert requetes[0].url.path == "/3/discover/tv"
     assert (params["with_watch_providers"], params["watch_region"]) == ("8", "FR")
+
+
+# --- Doublons : saisons regroupées, animes uniquement chez AniList --------------
+
+
+def _media(identifiant: int, fmt: str, **liens: list[tuple[int, str]]) -> dict[str, object]:
+    edges = [
+        {"relationType": relation, "node": {"id": i, "type": "ANIME", "format": f}}
+        for relation, cibles in liens.items()
+        for i, f in cibles
+    ]
+    return {
+        "id": identifiant,
+        "title": {"romaji": f"Titre {identifiant}"},
+        "format": fmt,
+        "episodes": 12,
+        "status": "FINISHED",
+        "startDate": {"year": 2013},
+        "coverImage": {"large": "https://img/x.jpg"},
+        "relations": {"edges": edges},
+    }
+
+
+def test_anilist_oeuvre_principale() -> None:
+    from app.providers.anilist import is_main_entry
+
+    assert is_main_entry(_media(1, "TV", SEQUEL=[(2, "TV")]))  # saison 1
+    assert not is_main_entry(_media(2, "TV", PREQUEL=[(1, "TV")]))  # saison 2
+    assert not is_main_entry(_media(3, "MOVIE", PREQUEL=[(1, "TV")]))  # film rattaché
+    assert is_main_entry(_media(4, "MOVIE"))  # film indépendant (ex. Your Name)
+    # One Piece : un court épisode web le « précède », il reste l'œuvre principale.
+    assert is_main_entry(_media(21, "TV", PREQUEL=[(5, "ONA")]))
+    # Série dérivée (Junior High) : rattachée à sa série principale.
+    assert not is_main_entry(_media(6, "TV", PARENT=[(1, "TV")]))
+    # Épisode spécial lié à un autre spécial : pas montré seul.
+    assert not is_main_entry(_media(7, "SPECIAL", PREQUEL=[(8, "SPECIAL")]))
+
+
+async def test_anilist_saisons_regroupees() -> None:
+    saison1 = {
+        **_media(16498, "TV", SEQUEL=[(20958, "TV"), (999, "MOVIE")]),
+        "genres": [],
+        "siteUrl": "https://anilist.co/anime/16498",
+    }
+    saison2 = _media(20958, "TV", PREQUEL=[(16498, "TV")], SEQUEL=[(99147, "TV")])
+    saison3 = {**_media(99147, "TV", PREQUEL=[(20958, "TV")]), "episodes": 10}
+    suites = {20958: saison2, 99147: saison3}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        identifiant = json.loads(request.content)["variables"]["id"]
+        media = saison1 if identifiant == 16498 else suites[identifiant]
+        return httpx.Response(200, json={"data": {"Media": media}})
+
+    async with faux_client(handler) as http:
+        fiche = await AniListProvider().get_detail(http, ContentKind.ANIME, "16498")
+        saison = await AniListProvider().get_season(http, "16498", 3)
+
+    assert fiche is not None
+    assert [(s.number, s.name, s.episode_count) for s in fiche.seasons] == [
+        (1, "Saison 1", 12),
+        (2, "Saison 2", 12),
+        (3, "Saison 3", 10),
+    ]
+    assert fiche.episodes_count == 34
+    assert saison is not None and len(saison) == 10
+    assert saison[0].season_number == 3
+
+
+async def test_tmdb_ignore_les_animes_japonais() -> None:
+    recherche = {
+        "results": [
+            {
+                "id": 37854,
+                "media_type": "tv",
+                "name": "One Piece",
+                "genre_ids": [16],
+                "original_language": "ja",
+            },
+            {
+                "id": 111110,
+                "media_type": "tv",
+                "name": "ONE PIECE",
+                "genre_ids": [10759],
+                "original_language": "en",
+            },
+        ]
+    }
+    async with faux_client(lambda _: httpx.Response(200, json=recherche)) as http:
+        resultats = await TmdbProvider("jeton").search(http, "one piece")
+    # L'anime vient d'AniList ; la série en prises de vues réelles reste.
+    assert [r.external_id for r in resultats] == ["111110"]
+
+    anime = {
+        "genres": [{"id": 16}],
+        "original_language": "ja",
+        "aggregate_credits": {"cast": [{"character": "Luffy", "profile_path": "/l.jpg"}]},
+    }
+    async with faux_client(lambda _: httpx.Response(200, json=anime)) as http:
+        persos = await TmdbProvider("jeton").get_characters(http, ContentKind.SERIES, "37854")
+    assert persos == []  # pas de photos de doubleurs : les cartes viennent d'AniList

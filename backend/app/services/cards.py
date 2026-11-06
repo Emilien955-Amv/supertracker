@@ -39,7 +39,7 @@ from typing import Any
 import httpx
 import structlog
 from pydantic import TypeAdapter
-from sqlalchemy import Select, and_, case, func, or_, select
+from sqlalchemy import Select, and_, case, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -288,6 +288,11 @@ async def ensure_cards(
                 },
             )
         )
+    # Cartes qui ne correspondent plus à aucun personnage (doublons, anime
+    # désormais fourni par AniList…) : supprimées.
+    await session.execute(
+        delete(Card).where(Card.content_id == content.id, Card.source_key.not_in(keys))
+    )
     content.cards_generated_at = _now()
     await session.commit()
 

@@ -33,19 +33,34 @@ _CHAMPS_COMMUNS = """
   description(asHtml: false)
 """
 
-EPISODES_QUERY = """
-query ($id: Int) {
-  Media(id: $id, type: ANIME) {
+# Liens avec les autres œuvres (suites, films…) : sert à regrouper les
+# saisons d'un même anime, qu'AniList enregistre comme des œuvres séparées.
+_RELATIONS = """
+  format
+  relations { edges { relationType node { id type format } } }
+"""
+
+SEASON_QUERY = f"""
+query ($id: Int) {{
+  Media(id: $id, type: ANIME) {{
+    id
+    title {{ romaji english native }}
     episodes
-    nextAiringEpisode { episode }
-  }
-}
+    nextAiringEpisode {{ episode }}
+    status
+    startDate {{ year month day }}
+    endDate {{ year month day }}
+    coverImage {{ large }}
+    {_RELATIONS}
+  }}
+}}
 """
 
 CHARACTERS_QUERY = """
-query ($id: Int) {
+query ($id: Int, $page: Int) {
   Media(id: $id, type: ANIME) {
-    characters(sort: [ROLE, RELEVANCE, ID], perPage: 40) {
+    characters(sort: [ROLE, RELEVANCE, ID], page: $page, perPage: 25) {
+      pageInfo { hasNextPage }
       edges {
         role
         node { name { full } image { large } }
@@ -61,11 +76,15 @@ ANILIST_ROLES = {
     "SUPPORTING": CharacterRole.SUPPORTING,
     "BACKGROUND": CharacterRole.BACKGROUND,
 }
-MAX_CHARACTERS = 25
-POPULAR_PAGES = 3  # 3 × 50 animes les plus populaires
-# Seconds rôles : les 4 premiers sont Rares, les 6 suivants « récurrents ».
-SUPPORTING_RARE = 4
-SUPPORTING_RECURRING = 6
+MAX_CHARACTERS = 100  # le plus possible : 4 pages de 25
+POPULAR_PAGES = 4  # 4 × 50 animes les plus populaires (avant regroupement)
+MAX_SEASONS = 20
+# Seconds rôles : les 6 premiers sont Rares, les 15 suivants « récurrents ».
+SUPPORTING_RARE = 6
+SUPPORTING_RECURRING = 15
+# Formats « série » : une suite de ce format est une nouvelle saison.
+SERIES_FORMATS = ("TV", "TV_SHORT", "ONA")
+ALL_FORMATS = ("TV", "TV_SHORT", "ONA", "MOVIE", "OVA", "SPECIAL", "MUSIC")
 
 POPULAR_QUERY = f"""
 query ($page: Int) {{
@@ -75,6 +94,7 @@ query ($page: Int) {{
       bannerImage
       siteUrl
       externalLinks {{ site type }}
+      {_RELATIONS}
     }}
   }}
 }}
@@ -85,6 +105,7 @@ query ($search: String) {{
   Page(perPage: 20) {{
     media(search: $search, type: ANIME, isAdult: false, sort: SEARCH_MATCH) {{
       {_CHAMPS_COMMUNS}
+      {_RELATIONS}
     }}
   }}
 }}
@@ -102,6 +123,7 @@ query ($id: Int) {{
     duration
     status
     siteUrl
+    {_RELATIONS}
   }}
 }}
 """
@@ -167,6 +189,54 @@ def _aired_episodes(media: dict[str, Any]) -> int | None:
     return int(upcoming) - 1 if upcoming and upcoming > 1 else None
 
 
+def _linked(media: dict[str, Any], relation: str, formats: tuple[str, ...]) -> list[int]:
+    """Identifiants des animes liés par « relation » (ex. SEQUEL) et d'un des formats."""
+    edges = (media.get("relations") or {}).get("edges") or []
+    return [
+        edge["node"]["id"]
+        for edge in edges
+        if edge.get("relationType") == relation
+        and (edge.get("node") or {}).get("type") == "ANIME"
+        and edge["node"].get("format") in formats
+    ]
+
+
+def is_main_entry(media: dict[str, Any]) -> bool:
+    """Vrai si l'anime est une œuvre « principale » à montrer seule.
+
+    - une série TV est principale si aucune série TV ne la précède (sinon
+      c'est une saison 2, 3… regroupée avec la première) et si ce n'est pas
+      une série dérivée d'une autre (ex. « Attack on Titan: Junior High ») ;
+      un court épisode web avant elle ne compte pas (cas de One Piece) ;
+    - une série web (ONA) suit la même règle, toute série la précédant comptant ;
+    - un film, un épisode spécial ou un résumé lié à un autre anime n'est pas
+      montré seul (« Your Name », sans lien, l'est).
+    """
+    fmt = media.get("format")
+    if fmt in ("TV", "TV_SHORT"):
+        return not (
+            _linked(media, "PREQUEL", ("TV", "TV_SHORT"))
+            or _linked(media, "PARENT", SERIES_FORMATS)
+        )
+    if fmt == "ONA":
+        return not (
+            _linked(media, "PREQUEL", SERIES_FORMATS) or _linked(media, "PARENT", SERIES_FORMATS)
+        )
+    return not any(
+        _linked(media, relation, ALL_FORMATS)
+        for relation in (
+            "PREQUEL",
+            "SEQUEL",
+            "PARENT",
+            "SIDE_STORY",
+            "SUMMARY",
+            "COMPILATION",
+            "ALTERNATIVE",
+            "SPIN_OFF",
+        )
+    )
+
+
 def _title(media: dict[str, Any]) -> tuple[str, str | None]:
     titles = media.get("title") or {}
     # Le titre anglais est souvent le plus connu en France ; sinon, le romaji.
@@ -208,7 +278,12 @@ class AniListProvider:
 
     async def search(self, http: httpx.AsyncClient, query: str) -> list[SearchResult]:
         data = await self._query(http, SEARCH_QUERY, {"search": query})
-        return [self._result(media) for media in (data.get("Page") or {}).get("media", [])]
+        medias = (data.get("Page") or {}).get("media", [])
+        # Une seule entrée par anime : les saisons 2, 3… et les films rattachés
+        # sont regroupés avec la série. (Si la recherche ne trouve QUE des
+        # suites, on les montre quand même.)
+        main = [media for media in medias if is_main_entry(media)] or medias
+        return [self._result(media) for media in main]
 
     async def get_detail(
         self, http: httpx.AsyncClient, kind: ContentKind, external_id: str
@@ -221,37 +296,70 @@ class AniListProvider:
 
         base = self._result(media)
         cover = media.get("coverImage") or {}
-        aired = _aired_episodes(media)
+        chain = await self._seasons(http, media)
+        seasons = [
+            SeasonSummary(
+                number=number,
+                name=f"Saison {number}" if len(chain) > 1 else "Épisodes",
+                episode_count=_aired_episodes(season),
+                air_date=_date(season.get("startDate")),
+                poster_url=(season.get("coverImage") or {}).get("large"),
+            )
+            for number, season in enumerate(chain, start=1)
+        ]
+        last = chain[-1]
+        total = sum(s.episode_count or 0 for s in seasons)
         return ContentDetail(
             **base.model_dump(exclude={"poster_url"}),
             poster_url=cover.get("extraLarge") or cover.get("large"),
             backdrop_url=media.get("bannerImage"),
             genres=[GENRES.get(genre, genre) for genre in media.get("genres", [])],
             release_date=_date(media.get("startDate")),
-            end_date=_date(media.get("endDate")),
+            end_date=_date(last.get("endDate")),
             runtime_minutes=media.get("duration"),
-            status=STATUTS.get(media.get("status", ""), media.get("status")),
-            episodes_count=aired,
-            # AniList n'a pas de saisons : une saison unique regroupe les épisodes.
-            seasons=[SeasonSummary(number=1, name="Épisodes", episode_count=aired)]
-            if aired
-            else [],
+            status=STATUTS.get(last.get("status", ""), last.get("status")),
+            seasons_count=len(seasons),
+            episodes_count=total or None,
+            seasons=[s for s in seasons if s.episode_count],
             source_url=media.get("siteUrl") or f"https://anilist.co/anime/{media['id']}",
-            is_finished=media.get("status") in ("FINISHED", "CANCELLED"),
+            is_finished=last.get("status") in ("FINISHED", "CANCELLED"),
         )
+
+    async def _seasons(
+        self, http: httpx.AsyncClient, first: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """La série puis ses suites (saison 2, 3…), en suivant les liens SEQUEL."""
+        chain = [first]
+        seen = {first["id"]}
+        current = first
+        while len(chain) < MAX_SEASONS:
+            following = [i for i in _linked(current, "SEQUEL", SERIES_FORMATS) if i not in seen]
+            if not following:
+                break
+            current = (await self._query(http, SEASON_QUERY, {"id": following[0]})).get(
+                "Media"
+            ) or {}
+            if not current:
+                break
+            seen.add(current["id"])
+            chain.append(current)
+        return chain
 
     async def get_season(
         self, http: httpx.AsyncClient, external_id: str, season_number: int
     ) -> list[EpisodeSummary] | None:
-        if season_number != 1 or not external_id.isdigit():
+        if season_number < 1 or not external_id.isdigit():
             return None
-        media = (await self._query(http, EPISODES_QUERY, {"id": int(external_id)})).get("Media")
+        media = (await self._query(http, SEASON_QUERY, {"id": int(external_id)})).get("Media")
         if not media:
+            return None
+        chain = await self._seasons(http, media)
+        if season_number > len(chain):
             return None
         # AniList ne fournit ni titre ni image par épisode : seulement les numéros.
         return [
-            EpisodeSummary(season_number=1, number=number)
-            for number in range(1, (_aired_episodes(media) or 0) + 1)
+            EpisodeSummary(season_number=season_number, number=number)
+            for number in range(1, (_aired_episodes(chain[season_number - 1]) or 0) + 1)
         ]
 
     async def get_characters(
@@ -259,8 +367,14 @@ class AniListProvider:
     ) -> list[CharacterSummary]:
         if kind != ContentKind.ANIME or not external_id.isdigit():
             return []
-        data = await self._query(http, CHARACTERS_QUERY, {"id": int(external_id)})
-        edges = (((data.get("Media") or {}).get("characters")) or {}).get("edges") or []
+        # Le plus de personnages possible : jusqu'à 4 pages de 25.
+        edges: list[dict[str, Any]] = []
+        for page in range(1, MAX_CHARACTERS // 25 + 1):
+            data = await self._query(http, CHARACTERS_QUERY, {"id": int(external_id), "page": page})
+            block = ((data.get("Media") or {}).get("characters")) or {}
+            edges += block.get("edges") or []
+            if not (block.get("pageInfo") or {}).get("hasNextPage"):
+                break
         characters: list[CharacterSummary] = []
         hero_given = False
         supporting = 0
@@ -301,6 +415,8 @@ class AniListProvider:
             medias += (data.get("Page") or {}).get("media", [])
         items = []
         for media in medias:
+            if not is_main_entry(media):
+                continue  # saison 2, film rattaché… : déjà dans la série principale
             base = self._result(media)
             cover = media.get("coverImage") or {}
             items.append(
