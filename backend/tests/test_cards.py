@@ -9,10 +9,9 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import delete, update
 
-from app.models import Booster, CardWallet, Rarity, XpEvent
+from app.models import Booster, CardWallet, Rarity
 from app.services import card_catalog, cards, gamification
 from app.services.cards import EPIC_OR_BETTER, RARE_OR_BETTER, PackTheme, draw
-from app.services.gamification import today
 from tests.conftest import Contexte
 
 FILM = "/api/tracking/tmdb/movie/603"
@@ -85,7 +84,8 @@ async def test_booster_de_bienvenue_catalogue_vide(
     db_client: AsyncClient, contexte: Contexte
 ) -> None:
     moi = await collection(db_client)
-    assert (moi["boosters"], moi["fragments"], moi["cards"]) == (1, 0, [])
+    assert (moi["boosters"], moi["fragments"]) == (1, 0)
+    assert (await db_client.get("/api/cards/binder")).json() == []
     assert 0 < moi["next_free_booster_in"] <= 300  # minuteur de 5 minutes lancé
 
     response = await db_client.post("/api/cards/boosters/open", json={"theme": "anime"})
@@ -157,34 +157,42 @@ async def test_un_booster_toutes_les_5_minutes(contexte: Contexte) -> None:
 
 
 @pytest.mark.integration
-async def test_un_booster_par_episode_vu(db_client: AsyncClient, contexte: Contexte) -> None:
+async def test_un_booster_par_oeuvre_terminee(db_client: AsyncClient, contexte: Contexte) -> None:
     ids = [e["id"] for e in (await db_client.get(f"{SERIE}/seasons/1")).json()]
     etat = (
         await db_client.post(f"{SERIE}/episodes", json={"episode_ids": ids, "watched": True})
     ).json()
-    assert etat["rewards"]["boosters"] == 2  # 2 épisodes
+    assert etat["rewards"]["boosters"] == 0  # cocher des épisodes ne donne pas de booster
 
-    # Décocher puis recocher ne redonne aucun booster.
-    await db_client.post(f"{SERIE}/episodes", json={"episode_ids": ids, "watched": False})
-    etat = (
-        await db_client.post(f"{SERIE}/episodes", json={"episode_ids": ids, "watched": True})
-    ).json()
-    assert (etat["rewards"] or {}).get("boosters", 0) == 0
-
-    # Dernier épisode : +1 (épisode) +1 (série terminée) +1 (niveau 2).
+    # Dernier épisode : la série est terminée (+1 booster), niveau 2 atteint (+1).
     ids2 = [e["id"] for e in (await db_client.get(f"{SERIE}/seasons/2")).json()]
     etat = (
         await db_client.post(f"{SERIE}/episodes", json={"episode_ids": ids2, "watched": True})
     ).json()
-    assert etat["rewards"]["boosters"] == 3
-    assert (await collection(db_client))["boosters"] == 1 + 2 + 3  # + bienvenue
+    assert etat["tracking"]["status"] == "completed"
+    assert etat["rewards"]["boosters"] == 2
+
+    # Un film terminé : +1 booster.
+    film = (await db_client.put(FILM, json={"status": "completed"})).json()
+    assert film["rewards"]["boosters"] == 1
+    # Changer d'avis puis le remettre en « terminé » ne redonne rien.
+    await db_client.put(FILM, json={"status": "watching"})
+    film = (await db_client.put(FILM, json={"status": "completed"})).json()
+    assert (film["rewards"] or {}).get("boosters", 0) == 0
+    assert (await collection(db_client))["boosters"] == 1 + 2 + 1  # + bienvenue
 
 
 @pytest.mark.integration
 async def test_fabriquer_une_carte(db_client: AsyncClient, contexte: Contexte) -> None:
     await db_client.put(FILM, json={"status": "watching"})
     await ouvrir(db_client, "movie")
-    cartes = (await collection(db_client))["cards"]
+    classeur = (await db_client.get("/api/cards/binder")).json()
+    assert [(p["content"]["title"], p["total"]) for p in classeur] == [("Matrix", 7)]
+    assert 1 <= classeur[0]["owned"] <= 5
+    page = (await db_client.get(f"/api/cards/binder/{classeur[0]['content']['id']}")).json()
+    cartes = page["cards"]
+    assert cartes[0]["rarity"] == "divine"  # de la plus rare à la plus commune
+    assert sum(c["owned"] for c in cartes) == classeur[0]["owned"]
     divine = next(c for c in cartes if c["rarity"] == "divine")
     # Sous le nom : l'importance du personnage, jamais l'acteur ni le doubleur.
     assert divine["subtitle"] == "Édition Divine"
@@ -302,36 +310,19 @@ async def test_liste_des_cartes_d_un_pack(db_client: AsyncClient, contexte: Cont
 
 
 @pytest.mark.integration
-async def test_booster_par_episode_meme_au_dela_du_plafond_d_xp(
+async def test_rattrapage_des_oeuvres_deja_terminees(
     db_client: AsyncClient, contexte: Contexte
 ) -> None:
-    # Plafond quotidien d'XP déjà atteint (gros rattrapage plus tôt dans la journée).
-    contexte.session.add(
-        XpEvent(user_id=contexte.alice.id, key="deja", kind="episode", amount=300, day=today())
-    )
-    await contexte.session.commit()
-
-    ids = [e["id"] for e in (await db_client.get(f"{SERIE}/seasons/1")).json()]
-    etat = (
-        await db_client.post(f"{SERIE}/episodes", json={"episode_ids": ids, "watched": True})
-    ).json()
-    assert "Épisodes vus" not in {line["label"] for line in etat["rewards"]["lines"]}
-    assert etat["rewards"]["boosters"] == 2  # pas d'XP, mais bien 2 boosters
-
-
-@pytest.mark.integration
-async def test_rattrapage_des_boosters_d_episodes(
-    db_client: AsyncClient, contexte: Contexte
-) -> None:
-    ids = [e["id"] for e in (await db_client.get(f"{SERIE}/seasons/1")).json()]
-    await db_client.post(f"{SERIE}/episodes", json={"episode_ids": ids, "watched": True})
-    # Simule des épisodes cochés avant la règle « un booster par épisode ».
+    await db_client.put(FILM, json={"status": "completed"})
+    # Simule un film terminé avant la règle « un booster par œuvre terminée ».
     await contexte.session.execute(
-        delete(Booster).where(Booster.user_id == contexte.alice.id, Booster.key.like("episode:%"))
+        delete(Booster).where(
+            Booster.user_id == contexte.alice.id, Booster.key.like("completion:%")
+        )
     )
     await contexte.session.commit()
 
-    assert (await collection(db_client))["boosters"] == 1 + 2  # bienvenue + 2 épisodes
+    assert (await collection(db_client))["boosters"] == 1 + 1  # bienvenue + Matrix
 
 
 @pytest.mark.integration
@@ -352,3 +343,8 @@ async def test_ouvrir_plusieurs_boosters_d_un_coup(
     assert resultat["boosters_left"] == 0
     response = await db_client.post("/api/cards/boosters/open", json={"count": 11})
     assert response.status_code == 422  # 10 au maximum
+
+
+@pytest.mark.integration
+async def test_classeur_oeuvre_introuvable(db_client: AsyncClient, contexte: Contexte) -> None:
+    assert (await db_client.get("/api/cards/binder/999999999")).status_code == 404

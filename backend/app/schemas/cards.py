@@ -72,7 +72,6 @@ class CollectionRead(BaseModel):
     free_booster_max_stock: int
     themes: list[ThemeRead]
     stats: list[RarityStat]
-    cards: list[CollectionCard]
 
 
 class OpenRequest(BaseModel):
@@ -112,4 +111,25 @@ class PackContents(BaseModel):
     total: int
     matching: int
     rarities: list[RarityCount]
+    cards: list[CollectionCard]
+
+
+class BinderContent(CardContent):
+    poster_url: str | None
+    year: int | None
+
+
+class BinderEntryRead(BaseModel):
+    """Une pochette du classeur : une œuvre et sa progression."""
+
+    content: BinderContent
+    owned: int
+    total: int
+
+
+class BinderPageRead(BaseModel):
+    """Toutes les cartes d'une œuvre."""
+
+    content: BinderContent
+    fragments: int
     cards: list[CollectionCard]

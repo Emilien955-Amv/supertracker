@@ -354,10 +354,6 @@ async def on_episodes_changed(
             amount = min(round(EPISODE_XP * multiplier), remaining)
             gained = await game.award(f"episode:{episode.id}", XpKind.EPISODE, amount, content.id)
             remaining -= gained
-            # Un booster par épisode vu, même au-delà du plafond d'XP. La clé
-            # unique empêche d'en obtenir deux pour le même épisode (cocher /
-            # décocher en boucle ne rapporte rien).
-            await game.booster(f"episode:{episode.id}")
             if episode.air_date is not None and episode.air_date >= day - timedelta(days=1):
                 await game.award(f"jour_j:{episode.id}", XpKind.JOUR_J, JOUR_J_XP, content.id)
 
@@ -427,4 +423,6 @@ async def _status_rewards(
         await game.award(f"movie:{content.id}", XpKind.MOVIE, amount, content.id)
     else:
         await game.award(f"completion:{content.id}", XpKind.COMPLETION, COMPLETION_XP, content.id)
-        await game.booster(f"completion:{content.id}")  # série terminée : un booster
+    # Un booster par film, série ou anime terminé. Clé unique : changer de
+    # statut puis revenir à « terminé » ne redonne pas de booster.
+    await game.booster(f"completion:{content.id}")

@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
+import { Binder } from "../components/Binder";
 import { BoosterReveal } from "../components/BoosterReveal";
-import { CardBack, GameCard } from "../components/GameCard";
 import { apiFetch } from "../lib/api";
 import {
   GENRE_THEMES,
@@ -13,29 +13,18 @@ import {
   RARITY_LABELS,
   THEME_ICONS,
 } from "../lib/cards";
-import type {
-  BoosterOpened,
-  CardRead,
-  Collection,
-  CollectionCard,
-  GenreTheme,
-  PackTheme,
-  PlatformTheme,
-  Rarity,
-} from "../lib/cards";
+import type { BoosterOpened, Collection, GenreTheme, PackTheme, PlatformTheme } from "../lib/cards";
 import { useApiResource } from "../lib/useApi";
 
-type Filter = "all" | "owned" | "missing";
-
-/** Collection de cartes : boosters par thème, minuteur, fragments, collection. */
+/** Page des cartes : boosters (par genre ou plateforme), progression, classeur. */
 export default function CardsPage() {
   const [state, setCollection] = useApiResource<Collection>("/api/cards/me");
   const [opened, setOpened] = useState<BoosterOpened | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
-  const [rarity, setRarity] = useState<Rarity | null>(null);
   const [byTen, setByTen] = useState(false); // ouvrir 10 boosters d'un coup
+  // Change après une ouverture : le classeur se recharge.
+  const [binderKey, setBinderKey] = useState(0);
 
   if (state.status === "idle" || state.status === "loading") {
     return <main className="mx-auto max-w-3xl px-5 pt-8 text-muted">Chargement…</main>;
@@ -72,34 +61,10 @@ export default function CardsPage() {
     }
   }
 
-  async function craft(card: CollectionCard) {
-    const label = `${card.title} (${RARITY_LABELS[card.rarity]})`;
-    if (!window.confirm(`Fabriquer « ${label} » pour ${card.craft_cost} fragments ?`)) return;
-    setError(null);
-    try {
-      await apiFetch<{ card: CardRead; fragments: number }>(`/api/cards/${card.id}/craft`, {
-        method: "POST",
-      });
-      await reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Échec de la fabrication.");
-    }
-  }
-
-  const visible = collection.cards.filter(
-    (card) =>
-      (filter === "all" || (filter === "owned") === card.owned) &&
-      (rarity === null || card.rarity === rarity),
-  );
-  // Regroupement par contenu, dans l'ordre reçu (alphabétique).
-  const groups = new Map<number, { title: string; cards: CollectionCard[] }>();
-  for (const card of visible) {
-    const group = groups.get(card.content.id) ?? { title: card.content.title, cards: [] };
-    group.cards.push(card);
-    groups.set(card.content.id, group);
-  }
   const ownedTotal = collection.stats.reduce((sum, s) => sum + s.owned, 0);
   const catalogTotal = collection.stats.reduce((sum, s) => sum + s.total, 0);
+  const genres = collection.themes.filter((t) => GENRE_THEMES.includes(t.theme as GenreTheme));
+  const platforms = collection.themes.filter((t) => !GENRE_THEMES.includes(t.theme as GenreTheme));
 
   return (
     <main className="mx-auto max-w-3xl px-5 pt-8">
@@ -135,35 +100,30 @@ export default function CardsPage() {
             <p className="mt-4 text-center text-sm text-muted">Choisissez votre pack :</p>
             <h3 className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted">Par genre</h3>
             <ul className="mt-2 grid grid-cols-2 gap-2">
-              {collection.themes
-                .filter((theme) => GENRE_THEMES.includes(theme.theme as GenreTheme))
-                .map((theme) => (
-                  <li key={theme.theme}>
-                    <PackButton theme={theme} busy={busy} onOpen={() => void openBooster(theme.theme)}>
-                      <span aria-hidden="true">{THEME_ICONS[theme.theme as GenreTheme]}</span>{" "}
-                      {theme.label}
-                    </PackButton>
-                  </li>
-                ))}
+              {genres.map((theme) => (
+                <li key={theme.theme}>
+                  <PackButton theme={theme} busy={busy} onOpen={() => void openBooster(theme.theme)}>
+                    <span aria-hidden="true">{THEME_ICONS[theme.theme as GenreTheme]}</span> {theme.label}
+                  </PackButton>
+                </li>
+              ))}
             </ul>
             <h3 className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted">
-              Par plateforme <span className="normal-case">(films et séries)</span>
+              Par plateforme
             </h3>
             <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {collection.themes
-                .filter((theme) => !GENRE_THEMES.includes(theme.theme as GenreTheme))
-                .map((theme) => (
-                  <li key={theme.theme}>
-                    <PackButton
-                      theme={theme}
-                      busy={busy}
-                      onOpen={() => void openBooster(theme.theme)}
-                      color={PLATFORM_COLORS[theme.theme as PlatformTheme]}
-                    >
-                      {theme.label}
-                    </PackButton>
-                  </li>
-                ))}
+              {platforms.map((theme) => (
+                <li key={theme.theme}>
+                  <PackButton
+                    theme={theme}
+                    busy={busy}
+                    onOpen={() => void openBooster(theme.theme)}
+                    color={PLATFORM_COLORS[theme.theme as PlatformTheme]}
+                  >
+                    {theme.label}
+                  </PackButton>
+                </li>
+              ))}
             </ul>
           </>
         )}
@@ -179,101 +139,36 @@ export default function CardsPage() {
         )}
       </section>
 
-      {/* Raretés : progression, probabilité, et filtre au clic. */}
+      {/* Progression par rareté et probabilité de chacune. */}
       <section aria-labelledby="raretes" className="mt-6">
         <h2 id="raretes" className="sr-only">
-          Raretés
+          Progression par rareté
         </h2>
         <ul className="flex flex-wrap gap-2">
           {RARITIES.map((r) => {
             const stat = collection.stats.find((s) => s.rarity === r);
             return (
-              <li key={r}>
-                <button
-                  type="button"
-                  aria-pressed={rarity === r}
-                  onClick={() => setRarity(rarity === r ? null : r)}
-                  className="rounded-full border px-3 py-1 text-xs"
-                  style={{
-                    borderColor: RARITY_COLORS[r],
-                    color: rarity === r ? "#0b0d12" : RARITY_COLORS[r],
-                    backgroundColor: rarity === r ? RARITY_COLORS[r] : "transparent",
-                  }}
-                >
-                  {RARITY_LABELS[r]} {stat?.owned ?? 0}/{stat?.total ?? 0}
-                  <span className="opacity-70"> · {stat?.chance_percent ?? 0} %</span>
-                </button>
+              <li
+                key={r}
+                className="rounded-full border px-3 py-1 text-xs"
+                style={{ borderColor: RARITY_COLORS[r], color: RARITY_COLORS[r] }}
+              >
+                {RARITY_LABELS[r]} {stat?.owned ?? 0}/{stat?.total ?? 0}
+                <span className="opacity-70"> · {stat?.chance_percent ?? 0} %</span>
               </li>
             );
           })}
         </ul>
-        <div role="group" aria-label="Afficher" className="mt-3 flex gap-2 text-sm">
-          {(
-            [
-              ["all", "Toutes"],
-              ["owned", "Obtenues"],
-              ["missing", "À découvrir"],
-            ] as [Filter, string][]
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={filter === value}
-              onClick={() => setFilter(value)}
-              className={`rounded-lg px-3 py-1.5 ${filter === value ? "bg-accent font-semibold text-white" : "border border-border hover:bg-surface"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
       </section>
 
-      {collection.cards.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-border bg-surface p-6 text-center">
-          <p className="text-muted">
-            Ouvrez un booster pour commencer votre collection de personnages !
-          </p>
-          <Link to="/recherche" className="mt-3 inline-block text-accent hover:underline">
-            Suivre un contenu →
-          </Link>
-        </div>
-      ) : (
-        <div className="mt-6 space-y-8">
-          {[...groups.entries()].map(([contentId, group]) => (
-            <section key={contentId} aria-label={group.title}>
-              <h2 className="mb-3 font-semibold">
-                {group.title}{" "}
-                <span className="text-sm font-normal text-muted">
-                  {/* Compté sur TOUTES les cartes du contenu, quel que soit le filtre. */}
-                  {collection.cards.filter((c) => c.content.id === contentId && c.owned).length}/
-                  {collection.cards.filter((c) => c.content.id === contentId).length}
-                </span>
-              </h2>
-              <ul className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-                {group.cards.map((card) => (
-                  <li key={card.id}>
-                    {card.owned ? (
-                      <GameCard card={card} />
-                    ) : (
-                      <MissingCard
-                        card={card}
-                        fragments={collection.fragments}
-                        onCraft={() => void craft(card)}
-                      />
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-      )}
+      <Binder key={binderKey} />
 
       {opened && (
         <BoosterReveal
           booster={opened}
           onClose={() => {
             setOpened(null);
+            setBinderKey((k) => k + 1);
             void reload();
           }}
           onNext={() => void openBooster(opened.theme)}
@@ -283,7 +178,7 @@ export default function CardsPage() {
   );
 }
 
-/** Bouton d'un pack : nom, nombre de cartes, désactivé s'il est vide. */
+/** Bouton d'un pack : nom, nombre de cartes, lien vers la liste des cartes. */
 function PackButton({
   theme,
   busy,
@@ -368,35 +263,8 @@ function FreeBoosterTimer({
       <span className="font-semibold text-text" aria-live="off">
         {minutes}:{rest}
       </span>{" "}
-      · un toutes les {collection.free_booster_minutes} min, et un par épisode vu
+      · un toutes les {collection.free_booster_minutes} min, et un par film, série ou anime
+      terminé
     </p>
-  );
-}
-
-/** Carte pas encore obtenue : dos de carte, rareté visible, fabrication possible. */
-function MissingCard({
-  card,
-  fragments,
-  onCraft,
-}: {
-  card: CollectionCard;
-  fragments: number;
-  onCraft: () => void;
-}) {
-  return (
-    <div>
-      <CardBack rarity={card.rarity} label={`${RARITY_LABELS[card.rarity]} à découvrir`} />
-      {card.craft_cost !== null && (
-        <button
-          type="button"
-          onClick={onCraft}
-          disabled={fragments < card.craft_cost}
-          aria-label={`Fabriquer une carte ${RARITY_LABELS[card.rarity]} de ${card.content.title} pour ${card.craft_cost} fragments`}
-          className="mt-1 w-full rounded-lg border border-border py-1 text-xs hover:bg-surface disabled:opacity-40"
-        >
-          Fabriquer · {card.craft_cost} 💎
-        </button>
-      )}
-    </div>
   );
 }

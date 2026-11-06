@@ -93,8 +93,16 @@ export type Collection = {
   free_booster_max_stock: number;
   themes: { theme: PackTheme; label: string; cards: number }[];
   stats: { rarity: Rarity; owned: number; total: number; chance_percent: number }[];
-  cards: CollectionCard[];
 };
+
+/** Œuvre telle que présentée dans le classeur. */
+export type BinderContent = CardRead["content"] & { poster_url: string | null; year: number | null };
+
+/** Une pochette du classeur : une œuvre et sa progression. */
+export type BinderEntry = { content: BinderContent; owned: number; total: number };
+
+/** Toutes les cartes d'une œuvre. */
+export type BinderPage = { content: BinderContent; fragments: number; cards: CollectionCard[] };
 
 /** Liste des cartes qu'on peut obtenir dans un pack (une page). */
 export type PackContents = {

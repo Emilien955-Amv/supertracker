@@ -21,8 +21,7 @@ Règles :
 - filet de sécurité : après 19 boosters sans Épique ou mieux, le 20e en
   contient forcément une ;
 - boosters gagnés : bienvenue, un toutes les 5 minutes (12 en réserve au
-  maximum), un par épisode vu (récompensé en XP), un par niveau, un par
-  série terminée ;
+  maximum), un par niveau, un par film, série ou anime terminé ;
 - un doublon se transforme en fragments, qui servent à fabriquer la carte
   manquante de son choix (sauf les Divines : uniquement par chance) ;
 - tout est tiré côté serveur, avec un générateur aléatoire non prévisible.
@@ -40,7 +39,7 @@ from typing import Any
 import httpx
 import structlog
 from pydantic import TypeAdapter
-from sqlalchemy import Select, case, func, or_, select
+from sqlalchemy import Select, and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,10 +51,9 @@ from app.models import (
     CardWallet,
     Content,
     ContentPlatform,
-    Episode,
-    EpisodeView,
     Rarity,
     Tracking,
+    TrackingStatus,
     UserCard,
 )
 from app.providers.base import (
@@ -358,17 +356,14 @@ async def _waiting_timer_boosters(session: AsyncSession, user_id: int) -> int:
 async def sync_boosters(session: AsyncSession, user_id: int, now: datetime | None = None) -> None:
     """Distribue les boosters dus : bienvenue, rattrapage des niveaux, minuteur."""
     await gamification.grant_booster(session, user_id, "welcome")
-    # Un booster par épisode diffusé déjà coché (rattrapage, une seule fois :
-    # la clé « episode:<id> » est unique).
+    # Un booster par œuvre déjà terminée (rattrapage, une seule fois : la clé
+    # « completion:<id> » est unique).
     await session.execute(
         insert(Booster)
         .from_select(
             ["user_id", "key"],
-            select(EpisodeView.user_id, func.concat("episode:", EpisodeView.episode_id))
-            .join(Episode, Episode.id == EpisodeView.episode_id)
-            .where(
-                EpisodeView.user_id == user_id,
-                or_(Episode.air_date.is_(None), Episode.air_date <= gamification.today()),
+            select(Tracking.user_id, func.concat("completion:", Tracking.content_id)).where(
+                Tracking.user_id == user_id, Tracking.status == TrackingStatus.COMPLETED
             ),
         )
         .on_conflict_do_nothing(index_elements=["user_id", "key"])
@@ -582,29 +577,58 @@ class CollectionEntry:
     owned: bool
 
 
-async def collection(session: AsyncSession, user_id: int) -> list[CollectionEntry]:
-    """Cartes des contenus dont on possède au moins une carte, ou qu'on suit.
+@dataclass
+class BinderEntry:
+    content: Content
+    owned: int
+    total: int
 
-    Le catalogue complet compte des milliers de cartes : on ne montre que
-    les séries de cartes commencées (avec celles qui manquent) et vos contenus.
-    """
-    owned = set(await session.scalars(select(UserCard.card_id).where(UserCard.user_id == user_id)))
-    tracked = select(Tracking.content_id).where(Tracking.user_id == user_id)
+
+async def binder(session: AsyncSession, user_id: int) -> list[BinderEntry]:
+    """Classeur : une « pochette » par œuvre dont on possède au moins une carte
+    (ou qu'on suit), avec le nombre de cartes obtenues sur le total."""
     started = (
         select(Card.content_id)
         .join(UserCard, UserCard.card_id == Card.id)
         .where(UserCard.user_id == user_id)
     )
+    tracked = select(Tracking.content_id).where(Tracking.user_id == user_id)
+    owned_card = and_(UserCard.card_id == Card.id, UserCard.user_id == user_id)
     rows = await session.execute(
-        select(Card, Content)
-        .join(Content, Content.id == Card.content_id)
-        .where(or_(Card.content_id.in_(tracked), Card.content_id.in_(started)))
-        .order_by(Content.title, Card.content_id, Card.id)
+        select(Content, func.count(UserCard.card_id), func.count(Card.id))
+        .join(Card, Card.content_id == Content.id)
+        .outerjoin(UserCard, owned_card)
+        .where(or_(Content.id.in_(started), Content.id.in_(tracked)))
+        .group_by(Content.id)
+        .order_by(func.lower(Content.title), Content.id)
     )
     return [
-        CollectionEntry(card=card, content=content, owned=card.id in owned)
-        for card, content in rows.tuples()
+        BinderEntry(content=content, owned=owned, total=total)
+        for content, owned, total in rows.tuples()
     ]
+
+
+async def binder_page(
+    session: AsyncSession, user_id: int, content_id: int
+) -> tuple[Content, list[CollectionEntry]] | None:
+    """Toutes les cartes d'une œuvre, de la plus rare à la plus commune."""
+    content = await session.get(Content, content_id)
+    if content is None:
+        return None
+    order = case({r.value: i for i, r in enumerate(RARITY_ORDER)}, value=Card.rarity)
+    cards = list(
+        await session.scalars(
+            select(Card).where(Card.content_id == content_id).order_by(order.desc(), Card.title)
+        )
+    )
+    owned = set(
+        await session.scalars(
+            select(UserCard.card_id).where(
+                UserCard.user_id == user_id, UserCard.card_id.in_([c.id for c in cards])
+            )
+        )
+    )
+    return content, [CollectionEntry(card=c, content=content, owned=c.id in owned) for c in cards]
 
 
 async def catalog_stats(

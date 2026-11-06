@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { AuthProvider } from "./auth/AuthContext";
 import { GuestOnly, RequireAuth } from "./auth/guards";
 import { AppShell } from "./components/AppShell";
+import BinderPage from "./pages/BinderPage";
 import CardsPage from "./pages/CardsPage";
 import PackPage from "./pages/PackPage";
 import ContentPage from "./pages/ContentPage";
@@ -38,6 +39,7 @@ export function AppRoutes() {
         <Route path="/profil" element={<ProfilePage />} />
         <Route path="/cartes" element={<CardsPage />} />
         <Route path="/cartes/pack/:theme" element={<PackPage />} />
+        <Route path="/cartes/oeuvre/:id" element={<BinderPage />} />
       </Route>
 
       <Route

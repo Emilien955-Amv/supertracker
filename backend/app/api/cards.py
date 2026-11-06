@@ -6,8 +6,12 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.api.deps import CurrentUser, HttpDep, ProvidersDep, SessionDep
 from app.core.rate_limit import enforce_rate_limit
-from app.models import Rarity
+from app.models import Content, Rarity
+from app.providers.base import ContentKind, Source
 from app.schemas.cards import (
+    BinderContent,
+    BinderEntryRead,
+    BinderPageRead,
     BoosterOpened,
     CardRead,
     CollectionCard,
@@ -32,7 +36,6 @@ async def my_collection(
     await service.sync_boosters(session, user.id)  # bienvenue, niveaux, minuteur
     # Vos contenus suivis rejoignent le catalogue de cartes.
     await service.refresh_cards(session, http, providers, user.id)
-    entries = await service.collection(session, user.id)
     wallet = await service.wallet_state(session, user.id)
     owned, totals, themes = await service.catalog_stats(session, user.id)
     total_weight = sum(service.WEIGHTS.values())
@@ -56,6 +59,43 @@ async def my_collection(
             )
             for rarity in Rarity
         ],
+    )
+
+
+def _binder_content(content: Content) -> BinderContent:
+    return BinderContent(
+        id=content.id,
+        source=Source(content.source),
+        kind=ContentKind(content.kind),
+        external_id=content.external_id,
+        title=content.title,
+        poster_url=content.poster_url,
+        year=content.year,
+    )
+
+
+@router.get("/binder", summary="Mon classeur : une pochette par œuvre")
+async def my_binder(user: CurrentUser, session: SessionDep) -> list[BinderEntryRead]:
+    return [
+        BinderEntryRead(content=_binder_content(e.content), owned=e.owned, total=e.total)
+        for e in await service.binder(session, user.id)
+    ]
+
+
+@router.get(
+    "/binder/{content_id}",
+    summary="Toutes les cartes d'une œuvre",
+    responses={404: {"description": "Œuvre introuvable"}},
+)
+async def binder_page(user: CurrentUser, session: SessionDep, content_id: int) -> BinderPageRead:
+    page = await service.binder_page(session, user.id, content_id)
+    if page is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Œuvre introuvable.")
+    content, entries = page
+    wallet = await service.wallet_state(session, user.id)
+    return BinderPageRead(
+        content=_binder_content(content),
+        fragments=wallet.fragments,
         cards=[
             CollectionCard(
                 **CardRead.of(e.card, e.content).model_dump(),

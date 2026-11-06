@@ -193,5 +193,5 @@ async def test_termine_coche_tous_les_episodes_diffuses(
     assert etat["tracking"]["status"] == "completed"
     assert etat["progress"] == {"watched": 3, "total": 3, "percent": 100}
     assert len(etat["changed_episode_ids"]) == 3  # saisons 1 et 2, pas l'épisode spécial
-    assert etat["rewards"]["boosters"] >= 3  # un par épisode
+    assert etat["rewards"]["boosters"] >= 1  # série terminée
     assert not any(e["watched"] for e in await episodes(db_client, 0))
