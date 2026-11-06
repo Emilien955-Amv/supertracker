@@ -283,6 +283,49 @@ describe("Bibliothèques", () => {
     );
   });
 
+  it("affiche le meuble avec ses étagères et passe en mode Ranger", async () => {
+    const fetchMock = mockFetch({
+      ...CONNECTE,
+      "GET /api/libraries/3": {
+        status: 200,
+        body: {
+          ...BIBLIO,
+          view_mode: "bookcase",
+          wood: "walnut",
+          wall: "#2b2236",
+          item_size: "medium",
+          shelves: [
+            { id: 10, name: "Mangas", position: 0 },
+            { id: 11, name: null, position: 1 },
+          ],
+          items: [
+            { ...element(1, "Matrix"), shelf_id: 11 },
+            { ...element(2, "Alien"), shelf_id: 10 },
+          ],
+        },
+      },
+      "POST /api/libraries/3/shelves": { status: 201, body: { id: 12, name: null, position: 2 } },
+    });
+    afficher("/bibliotheques/3");
+
+    // Plaque de l'étagère nommée, et chaque œuvre sur la bonne étagère.
+    const mangas = await screen.findByRole("region", { name: "Mangas" });
+    expect(within(mangas).getByRole("link", { name: /Alien/ })).toBeTruthy();
+    const seconde = screen.getByRole("region", { name: "Étagère 2" });
+    expect(within(seconde).getByRole("link", { name: /Matrix/ })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ranger" }));
+    expect(screen.getByRole("button", { name: "Déplacer Matrix" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Monter Mangas" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "+ Ajouter une étagère" }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/libraries/3/shelves" && init?.method === "POST")).toBe(true),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Personnaliser" }));
+    expect(screen.getByRole("button", { name: /Noyer/ }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("signale une bibliothèque introuvable", async () => {
     mockFetch({ ...CONNECTE, "GET /api/libraries/99": { status: 404, body: { detail: "Bibliothèque introuvable." } } });
     afficher("/bibliotheques/99");

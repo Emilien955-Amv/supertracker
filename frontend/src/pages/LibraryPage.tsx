@@ -2,13 +2,14 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
+import { Bookcase, WOODS } from "../components/Bookcase";
 import { ColorPicker } from "../components/ColorPicker";
 import { Poster } from "../components/Poster";
 import { ApiError, apiFetch } from "../lib/api";
 import { KIND_LABELS, contentPath } from "../lib/catalog";
 import type { ContentKind } from "../lib/catalog";
 import { SORT_MODE_LABELS, STATUS_COLORS, STATUS_LABELS, VIEW_MODE_LABELS } from "../lib/tracking";
-import type { LibraryDetail, LibraryItem, SortMode, ViewMode } from "../lib/tracking";
+import type { ItemSize, LibraryDetail, LibraryItem, SortMode, ViewMode, Wood } from "../lib/tracking";
 import { useApiResource } from "../lib/useApi";
 
 /** Une bibliothèque : affichage au choix, tri, réorganisation et réglages. */
@@ -18,6 +19,8 @@ export default function LibraryPage() {
   const path = `/api/libraries/${id}`;
   const [state, setLibrary] = useApiResource<LibraryDetail>(path);
   const [organizing, setOrganizing] = useState(false);
+  const [arranging, setArranging] = useState(false); // mode « Ranger » du meuble
+  const [customizing, setCustomizing] = useState(false); // panneau « Personnaliser »
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +42,7 @@ export default function LibraryPage() {
   }
 
   const library = state.data;
+  const isBookcase = library.view_mode === "bookcase";
 
   /** Exécute une modification ; en cas d'échec, restaure l'état précédent. */
   async function run(action: () => Promise<void>) {
@@ -54,7 +58,13 @@ export default function LibraryPage() {
 
   const reload = async () => setLibrary(await apiFetch<LibraryDetail>(path));
 
-  function changeSettings(changes: { view_mode?: ViewMode; sort_mode?: SortMode }) {
+  function changeSettings(changes: {
+    view_mode?: ViewMode;
+    sort_mode?: SortMode;
+    wood?: Wood;
+    wall?: string;
+    item_size?: ItemSize;
+  }) {
     setLibrary({ ...library, ...changes }); // affichage immédiat
     void run(async () => {
       await apiFetch(path, { method: "PATCH", body: changes });
@@ -146,6 +156,29 @@ export default function LibraryPage() {
             </button>
           ))}
         </div>
+        {isBookcase ? (
+          <>
+            <button
+              type="button"
+              aria-pressed={arranging}
+              onClick={() => setArranging(!arranging)}
+              className={`rounded-xl border px-3 py-1.5 text-sm ${
+                arranging ? "border-accent bg-accent font-semibold text-white" : "border-border hover:bg-surface"
+              }`}
+            >
+              {arranging ? "Terminer" : "Ranger"}
+            </button>
+            <button
+              type="button"
+              aria-expanded={customizing}
+              onClick={() => setCustomizing(!customizing)}
+              className="rounded-xl border border-border px-3 py-1.5 text-sm hover:bg-surface"
+            >
+              Personnaliser
+            </button>
+          </>
+        ) : (
+        <>
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted">Tri</span>
           <select
@@ -172,7 +205,19 @@ export default function LibraryPage() {
             {organizing ? "Terminer" : "Organiser"}
           </button>
         )}
+        </>
+        )}
       </div>
+
+      {isBookcase && customizing && (
+        <CustomizePanel library={library} onChange={(changes) => changeSettings(changes)} />
+      )}
+      {isBookcase && arranging && (
+        <p className="mt-3 text-sm text-muted">
+          Glissez les œuvres d'une étagère à l'autre (au doigt : appui long). Nommez, déplacez ou
+          supprimez les étagères ; ajoutez-en en bas du meuble.
+        </p>
+      )}
 
       {error && (
         <p role="alert" className="mt-3 text-sm text-error">
@@ -181,7 +226,14 @@ export default function LibraryPage() {
       )}
 
       <div className="mt-5">
-        {library.items.length === 0 ? (
+        {isBookcase ? (
+          <Bookcase
+            library={library}
+            arranging={arranging}
+            onChange={setLibrary}
+            onError={setError}
+          />
+        ) : library.items.length === 0 ? (
           <div className="rounded-xl border border-border bg-surface p-6 text-center">
             <p className="text-muted">Cette bibliothèque est vide.</p>
             <p className="mt-1 text-sm text-muted">
@@ -392,5 +444,89 @@ function OrganizeList({
         </li>
       ))}
     </ol>
+  );
+}
+
+
+// Couleurs de mur proposées (en plus du sélecteur libre).
+const WALLS = ["#2b2236", "#1e2a38", "#2f3b2f", "#3b2a2a", "#4a4036", "#e9e4da", "#0b0d12"];
+const SIZE_LABELS: Record<ItemSize, string> = { small: "Petits", medium: "Moyens", large: "Grands" };
+
+/** Personnalisation du meuble : bois, mur, taille des objets. */
+function CustomizePanel({
+  library,
+  onChange,
+}: {
+  library: LibraryDetail;
+  onChange: (changes: { wood?: Wood; wall?: string; item_size?: ItemSize }) => void;
+}) {
+  return (
+    <section
+      aria-label="Personnaliser le meuble"
+      className="mt-4 space-y-4 rounded-xl border border-border bg-surface p-4"
+    >
+      <fieldset>
+        <legend className="text-sm text-muted">Bois du meuble</legend>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {(Object.keys(WOODS) as Wood[]).map((wood) => (
+            <button
+              key={wood}
+              type="button"
+              aria-pressed={library.wood === wood}
+              onClick={() => onChange({ wood })}
+              className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-sm ${
+                library.wood === wood ? "border-accent" : "border-border"
+              }`}
+            >
+              <span aria-hidden="true" className="h-5 w-8 rounded" style={{ background: WOODS[wood].board }} />
+              {WOODS[wood].label}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend className="text-sm text-muted">Couleur du mur</legend>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {WALLS.map((wall) => (
+            <button
+              key={wall}
+              type="button"
+              aria-pressed={library.wall === wall}
+              aria-label={`Mur ${wall}`}
+              onClick={() => onChange({ wall })}
+              className={`h-8 w-8 rounded-full border-2 ${library.wall === wall ? "border-text" : "border-transparent"}`}
+              style={{ backgroundColor: wall }}
+            />
+          ))}
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-muted">Autre :</span>
+            <input
+              type="color"
+              value={library.wall}
+              onChange={(e) => onChange({ wall: e.target.value })}
+              className="h-8 w-10 cursor-pointer rounded border border-border bg-transparent"
+            />
+          </label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend className="text-sm text-muted">Taille des objets</legend>
+        <div className="mt-2 flex rounded-xl border border-border p-0.5">
+          {(Object.keys(SIZE_LABELS) as ItemSize[]).map((size) => (
+            <button
+              key={size}
+              type="button"
+              aria-pressed={library.item_size === size}
+              onClick={() => onChange({ item_size: size })}
+              className={`flex-1 rounded-lg px-3 py-1.5 text-sm ${
+                library.item_size === size ? "bg-accent font-semibold text-white" : "hover:bg-bg"
+              }`}
+            >
+              {SIZE_LABELS[size]}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+    </section>
   );
 }

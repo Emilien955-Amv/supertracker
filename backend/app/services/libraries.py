@@ -7,12 +7,14 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Content, Library, LibraryItem, SortMode, Tracking
+from app.models import Content, Library, LibraryItem, LibraryShelf, SortMode, Tracking
 
 # Limites anti-abus : largement au-dessus d'un usage normal.
 MAX_LIBRARIES = 50
 MAX_ITEMS = 1000
 PREVIEW_SIZE = 4
+MAX_SHELVES = 30
+DEFAULT_SHELVES = 3
 
 
 class LibraryNotFoundError(Exception):
@@ -25,6 +27,10 @@ class LibraryNameTakenError(Exception):
 
 class LibraryLimitError(Exception):
     pass
+
+
+class LastShelfError(Exception):
+    """On ne peut pas supprimer la dernière étagère."""
 
 
 class InvalidOrderError(Exception):
@@ -153,6 +159,12 @@ async def create_library(
     session.add(library)
     await _commit_or_name_taken(session)
     await session.refresh(library)
+    # Un meuble neuf : trois étagères vides.
+    session.add_all(
+        LibraryShelf(library_id=library.id, position=position)
+        for position in range(DEFAULT_SHELVES)
+    )
+    await session.commit()
     return library
 
 
@@ -199,7 +211,7 @@ async def list_items(
 
 
 async def add_item(session: AsyncSession, library: Library, content: Content) -> None:
-    """Ajoute un contenu en fin de liste. Sans effet s'il y est déjà."""
+    """Ajoute un contenu au bout de la première étagère. Sans effet s'il y est déjà."""
     count, last = (
         await session.execute(
             select(func.count(), func.max(LibraryItem.position)).where(
@@ -209,15 +221,124 @@ async def add_item(session: AsyncSession, library: Library, content: Content) ->
     ).one()
     if count >= MAX_ITEMS:
         raise LibraryLimitError
+    shelves = await list_shelves(session, library)
+    if not shelves:  # bibliothèque sans étagère : on en crée une
+        shelf = LibraryShelf(library_id=library.id, position=0)
+        session.add(shelf)
+        await session.flush()
+        shelves = [shelf]
     await session.execute(
         insert(LibraryItem)
         .values(
             library_id=library.id,
             content_id=content.id,
+            shelf_id=shelves[0].id,
             position=0 if last is None else last + 1,
         )
         .on_conflict_do_nothing()
     )
+    await session.commit()
+
+
+# --- Étagères (vue « bibliothèque ») -------------------------------------------------
+
+
+async def list_shelves(session: AsyncSession, library: Library) -> list[LibraryShelf]:
+    return list(
+        await session.scalars(
+            select(LibraryShelf)
+            .where(LibraryShelf.library_id == library.id)
+            .order_by(LibraryShelf.position, LibraryShelf.id)
+        )
+    )
+
+
+async def get_shelf(session: AsyncSession, library: Library, shelf_id: int) -> LibraryShelf:
+    shelf = await session.scalar(
+        select(LibraryShelf).where(
+            LibraryShelf.id == shelf_id, LibraryShelf.library_id == library.id
+        )
+    )
+    if shelf is None:
+        raise LibraryNotFoundError
+    return shelf
+
+
+async def add_shelf(session: AsyncSession, library: Library, name: str | None) -> LibraryShelf:
+    """Ajoute une étagère en bas du meuble."""
+    shelves = await list_shelves(session, library)
+    if len(shelves) >= MAX_SHELVES:
+        raise LibraryLimitError
+    shelf = LibraryShelf(
+        library_id=library.id, name=name, position=(shelves[-1].position + 1) if shelves else 0
+    )
+    session.add(shelf)
+    await session.commit()
+    await session.refresh(shelf)
+    return shelf
+
+
+async def rename_shelf(session: AsyncSession, shelf: LibraryShelf, name: str | None) -> None:
+    shelf.name = name
+    await session.commit()
+
+
+async def delete_shelf(session: AsyncSession, library: Library, shelf: LibraryShelf) -> None:
+    """Supprime une étagère : ses objets glissent sur l'étagère voisine."""
+    shelves = await list_shelves(session, library)
+    if len(shelves) <= 1:
+        raise LastShelfError
+    others = [s for s in shelves if s.id != shelf.id]
+    # L'étagère du dessus si elle existe, sinon celle du dessous.
+    above = [s for s in others if s.position <= shelf.position]
+    target = above[-1] if above else others[0]
+    last = await session.scalar(
+        select(func.max(LibraryItem.position)).where(LibraryItem.shelf_id == target.id)
+    )
+    moving = list(
+        await session.scalars(
+            select(LibraryItem)
+            .where(LibraryItem.shelf_id == shelf.id)
+            .order_by(LibraryItem.position)
+        )
+    )
+    for offset, item in enumerate(moving, start=1):
+        item.shelf_id = target.id
+        item.position = (last if last is not None else -1) + offset
+    await session.delete(shelf)
+    await session.commit()
+
+
+async def save_layout(
+    session: AsyncSession, library: Library, layout: list[tuple[int, list[int]]]
+) -> None:
+    """Enregistre tout le rangement : ordre des étagères et des objets.
+
+    « layout » : [(id de l'étagère, [ids des contenus de gauche à droite]), …],
+    de l'étagère du haut à celle du bas. Chaque étagère et chaque objet de la
+    bibliothèque doit y figurer exactement une fois.
+    """
+    shelves = {s.id: s for s in await list_shelves(session, library)}
+    items = {
+        item.content_id: item
+        for item in await session.scalars(
+            select(LibraryItem).where(LibraryItem.library_id == library.id)
+        )
+    }
+    shelf_ids = [shelf_id for shelf_id, _ in layout]
+    content_ids = [cid for _, ids in layout for cid in ids]
+    if (
+        len(shelf_ids) != len(set(shelf_ids))
+        or set(shelf_ids) != set(shelves)
+        or len(content_ids) != len(set(content_ids))
+        or set(content_ids) != set(items)
+    ):
+        raise InvalidOrderError
+    for shelf_position, (shelf_id, ids) in enumerate(layout):
+        shelves[shelf_id].position = shelf_position
+        for position, content_id in enumerate(ids):
+            items[content_id].shelf_id = shelf_id
+            items[content_id].position = position
     await session.commit()
 
 

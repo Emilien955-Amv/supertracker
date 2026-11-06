@@ -124,7 +124,7 @@ async def test_doublons_en_fragments(db_client: AsyncClient, contexte: Contexte)
             if not tirage["is_new"]:
                 assert tirage["fragments"] > 0
                 fragments += tirage["fragments"]
-    # 15 cartes tirées parmi 7 cartes Matrix : forcément des doublons.
+    # 15 cartes tirées parmi 5 cartes Matrix : forcément des doublons.
     assert fragments > 0
     assert (await collection(db_client))["fragments"] == fragments
 
@@ -187,7 +187,7 @@ async def test_fabriquer_une_carte(db_client: AsyncClient, contexte: Contexte) -
     await db_client.put(FILM, json={"status": "watching"})
     await ouvrir(db_client, "movie")
     classeur = (await db_client.get("/api/cards/binder")).json()
-    assert [(p["content"]["title"], p["total"]) for p in classeur] == [("Matrix", 7)]
+    assert [(p["content"]["title"], p["total"]) for p in classeur] == [("Matrix", 5)]
     assert 1 <= classeur[0]["owned"] <= 5
     page = (await db_client.get(f"/api/cards/binder/{classeur[0]['content']['id']}")).json()
     cartes = page["cards"]
@@ -195,7 +195,7 @@ async def test_fabriquer_une_carte(db_client: AsyncClient, contexte: Contexte) -
     assert sum(c["owned"] for c in cartes) == classeur[0]["owned"]
     divine = next(c for c in cartes if c["rarity"] == "divine")
     # Sous le nom : l'importance du personnage, jamais l'acteur ni le doubleur.
-    assert divine["subtitle"] == "Édition Divine"
+    assert (divine["title"], divine["subtitle"]) == ("Neo (603)", "Héros")
     morpheus = {c["subtitle"] for c in cartes if c["title"].startswith("Morpheus")}
     assert morpheus == {"Rôle principal"}
 
@@ -248,7 +248,7 @@ async def test_packs_par_plateforme(db_client: AsyncClient, contexte: Contexte) 
     )
     moi = await collection(db_client)
     packs = {theme["theme"]: theme["cards"] for theme in moi["themes"]}
-    assert packs["netflix"] == 7  # les 7 cartes de Pulp Fiction
+    assert packs["netflix"] == 5  # les 5 personnages
     assert packs["disney"] == 0
 
     booster = await ouvrir(db_client, "netflix")
@@ -278,33 +278,29 @@ async def test_liste_des_cartes_d_un_pack(db_client: AsyncClient, contexte: Cont
     )
 
     pack = (await db_client.get("/api/cards/packs/netflix")).json()
-    assert (pack["label"], pack["total"], pack["matching"]) == ("Netflix", 7, 7)
-    # De la plus rare à la plus commune.
-    assert [c["rarity"] for c in pack["cards"]] == [
-        "divine",
-        "mythic",
-        "legendary",
-        "epic",
-        "rare",
-        "uncommon",
-        "common",
+    assert (pack["label"], pack["total"], pack["matching"]) == ("Netflix", 5, 5)
+    # De la plus rare à la plus commune, un personnage différent à chaque rareté haute.
+    assert [(c["rarity"], c["title"]) for c in pack["cards"]] == [
+        ("divine", "Neo (680)"),
+        ("mythic", "Morpheus (680)"),
+        ("legendary", "Oracle (680)"),
+        ("legendary", "Tank (680)"),
+        ("common", "Figurant (680)"),
     ]
     assert not any(c["owned"] for c in pack["cards"])
-    assert {r["rarity"]: r["count"] for r in pack["rarities"]}["epic"] == 1
     # Une seule Divine par œuvre : celle de son héros.
     assert {r["rarity"]: r["count"] for r in pack["rarities"]}["divine"] == 1
 
-    epiques = (await db_client.get("/api/cards/packs/netflix", params={"rarity": "epic"})).json()
-    assert [c["title"] for c in epiques["cards"]] == ["Morpheus (680)"]
+    params = {"rarity": "mythic"}
+    mythiques = (await db_client.get("/api/cards/packs/netflix", params=params)).json()
+    assert [c["title"] for c in mythiques["cards"]] == ["Morpheus (680)"]
     trouve = (await db_client.get("/api/cards/packs/netflix", params={"q": "tank"})).json()
     assert [c["title"] for c in trouve["cards"]] == ["Tank (680)"]
     # Les caractères spéciaux ne cassent pas la recherche.
-    assert (await db_client.get("/api/cards/packs/netflix", params={"q": "%_"})).json()[
-        "matching"
-    ] == 0
-    page2 = (
-        await db_client.get("/api/cards/packs/netflix", params={"offset": 5, "limit": 5})
-    ).json()
+    vide = (await db_client.get("/api/cards/packs/netflix", params={"q": "%_"})).json()
+    assert vide["matching"] == 0
+    params = {"offset": 3, "limit": 5}
+    page2 = (await db_client.get("/api/cards/packs/netflix", params=params)).json()
     assert len(page2["cards"]) == 2
     assert (await db_client.get("/api/cards/packs/inconnu")).status_code == 422
 
@@ -348,3 +344,19 @@ async def test_ouvrir_plusieurs_boosters_d_un_coup(
 @pytest.mark.integration
 async def test_classeur_oeuvre_introuvable(db_client: AsyncClient, contexte: Contexte) -> None:
     assert (await db_client.get("/api/cards/binder/999999999")).status_code == 404
+
+
+def test_un_personnage_different_par_rarete_haute() -> None:
+    from app.providers.base import CharacterRole as Role
+    from app.services.cards import rarity_for
+
+    assert [rarity_for(rang, Role.MAIN) for rang in range(6)] == [
+        Rarity.DIVINE,
+        Rarity.MYTHIC,
+        Rarity.LEGENDARY,
+        Rarity.LEGENDARY,
+        Rarity.EPIC,
+        Rarity.EPIC,
+    ]
+    assert rarity_for(10, Role.SUPPORTING) == Rarity.RARE
+    assert rarity_for(30, Role.BACKGROUND) == Rarity.COMMON

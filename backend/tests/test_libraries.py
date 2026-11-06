@@ -28,7 +28,9 @@ async def test_creer_et_lister(db_client: AsyncClient, contexte: Contexte) -> No
 
     assert biblio["name"] == "Coups de cœur"  # espaces retirés
     assert biblio["color"] == "#ff0055"  # toujours en minuscules
-    assert (biblio["view_mode"], biblio["sort_mode"]) == ("grid", "manual")
+    # Nouvelle bibliothèque : vue « meuble », chêne clair, objets de taille moyenne.
+    assert (biblio["view_mode"], biblio["sort_mode"]) == ("bookcase", "manual")
+    assert (biblio["wood"], biblio["item_size"]) == ("oak", "medium")
     liste = (await db_client.get("/api/libraries")).json()
     assert [(b["name"], b["items_count"]) for b in liste] == [("Coups de cœur", 0)]
 
@@ -147,3 +149,71 @@ async def test_bibliotheque_d_un_autre_utilisateur_invisible(
     assert (await db_client.post(f"{url}/items", json=MATRIX)).status_code == 404
     assert (await db_client.delete(url)).status_code == 404
     assert (await db_client.get("/api/libraries")).json() == []
+
+
+async def test_meuble_et_etageres(db_client: AsyncClient, contexte: Contexte) -> None:
+    biblio = await creer(db_client)
+    url = f"/api/libraries/{biblio['id']}"
+    for contenu in (MATRIX, GOT):
+        await db_client.post(f"{url}/items", json=contenu)
+
+    detail = (await db_client.get(url)).json()
+    etageres = [e["id"] for e in detail["shelves"]]
+    assert len(etageres) == 3  # meuble neuf : trois étagères
+    # Les nouveaux objets arrivent sur l'étagère du haut.
+    assert {item["shelf_id"] for item in detail["items"]} == {etageres[0]}
+
+    # Personnalisation : bois, mur, taille.
+    reponse = await db_client.patch(
+        url, json={"wood": "walnut", "wall": "#112233", "item_size": "large"}
+    )
+    assert (reponse.json()["wood"], reponse.json()["wall"]) == ("walnut", "#112233")
+    assert (await db_client.patch(url, json={"wood": "plastique"})).status_code == 422
+
+    # Ranger : Game of Thrones sur l'étagère du bas, ordre des étagères inversé.
+    ids = {item["content"]["title"]: item["content"]["id"] for item in detail["items"]}
+    rangement = {
+        "shelves": [
+            {"id": etageres[2], "content_ids": [ids["Game of Thrones"]]},
+            {"id": etageres[1], "content_ids": []},
+            {"id": etageres[0], "content_ids": [ids["Matrix"]]},
+        ]
+    }
+    assert (await db_client.put(f"{url}/layout", json=rangement)).status_code == 204
+    detail = (await db_client.get(url)).json()
+    assert [e["id"] for e in detail["shelves"]] == etageres[::-1]
+    place = {item["content"]["title"]: item["shelf_id"] for item in detail["items"]}
+    assert place == {"Game of Thrones": etageres[2], "Matrix": etageres[0]}
+
+    # Rangement incomplet (un objet oublié) : refusé.
+    incomplet = {"shelves": [{"id": e, "content_ids": []} for e in etageres]}
+    assert (await db_client.put(f"{url}/layout", json=incomplet)).status_code == 422
+
+    # Ajouter, renommer, supprimer une étagère.
+    nouvelle = (await db_client.post(f"{url}/shelves", json={"name": "  Mangas  "})).json()
+    assert nouvelle["name"] == "Mangas"
+    reponse = await db_client.patch(f"{url}/shelves/{nouvelle['id']}", json={"name": "Animes"})
+    assert reponse.json()["name"] == "Animes"
+    # Supprimer l'étagère de Matrix : Matrix glisse sur l'étagère voisine.
+    assert (await db_client.delete(f"{url}/shelves/{etageres[0]}")).status_code == 204
+    detail = (await db_client.get(url)).json()
+    assert len(detail["shelves"]) == 3
+    assert all(item["shelf_id"] is not None for item in detail["items"])
+
+
+async def test_derniere_etagere_et_cloisonnement(
+    db_client: AsyncClient, contexte: Contexte
+) -> None:
+    biblio = await creer(db_client)
+    url = f"/api/libraries/{biblio['id']}"
+    etageres = [e["id"] for e in (await db_client.get(url)).json()["shelves"]]
+    for etagere in etageres[:-1]:
+        assert (await db_client.delete(f"{url}/shelves/{etagere}")).status_code == 204
+    # Un meuble garde au moins une étagère.
+    assert (await db_client.delete(f"{url}/shelves/{etageres[-1]}")).status_code == 409
+
+    # Bob ne touche pas aux étagères d'Alice.
+    contexte.connecter(contexte.bob)
+    assert (await db_client.post(f"{url}/shelves", json={})).status_code == 404
+    reponse = await db_client.patch(f"{url}/shelves/{etageres[-1]}", json={"name": "x"})
+    assert reponse.status_code == 404

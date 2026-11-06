@@ -6,9 +6,10 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.api.deps import CurrentUser, HttpDep, ProvidersDep, SessionDep
 from app.core.rate_limit import enforce_rate_limit
-from app.models import Library, TrackingStatus
+from app.models import Library, LibraryShelf, TrackingStatus
 from app.providers.base import ContentKind, ProviderError, Source
 from app.schemas.library import (
+    LayoutWrite,
     LibraryCreate,
     LibraryDetail,
     LibraryItemAdd,
@@ -16,6 +17,8 @@ from app.schemas.library import (
     LibraryOrder,
     LibraryRead,
     LibraryUpdate,
+    ShelfRead,
+    ShelfWrite,
 )
 from app.schemas.tracking import ContentRead
 from app.services import content as content_service
@@ -104,6 +107,7 @@ async def get_library(user: CurrentUser, session: SessionDep, library_id: int) -
     items = [
         LibraryItemRead(
             content=ContentRead.model_validate(content),
+            shelf_id=item.shelf_id,
             position=item.position,
             added_at=item.added_at,
             tracking_status=TrackingStatus(tracking_status) if tracking_status else None,
@@ -111,7 +115,8 @@ async def get_library(user: CurrentUser, session: SessionDep, library_id: int) -
         for item, content, tracking_status in rows
     ]
     summary = await _read(session, library)
-    return LibraryDetail(**summary.model_dump(), items=items)
+    shelves = [ShelfRead.model_validate(s) for s in await service.list_shelves(session, library)]
+    return LibraryDetail(**summary.model_dump(), shelves=shelves, items=items)
 
 
 @router.patch("/{library_id}", summary="Renommer, recolorer, changer l'affichage ou le tri")
@@ -202,5 +207,90 @@ async def reorder(
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "La liste doit contenir chaque élément de la bibliothèque, une seule fois.",
+        ) from None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- Étagères (vue « bibliothèque ») -------------------------------------------------
+
+
+@router.post(
+    "/{library_id}/shelves",
+    status_code=status.HTTP_201_CREATED,
+    summary="Ajouter une étagère en bas du meuble",
+    responses=NOT_FOUND,
+)
+async def add_shelf(
+    user: CurrentUser, session: SessionDep, library_id: int, body: ShelfWrite
+) -> ShelfRead:
+    library = await _get(session, user.id, library_id)
+    try:
+        shelf = await service.add_shelf(session, library, body.name or None)
+    except service.LibraryLimitError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Ce meuble est complet ({service.MAX_SHELVES} étagères au maximum).",
+        ) from None
+    return ShelfRead.model_validate(shelf)
+
+
+async def _shelf(
+    session: SessionDep, user_id: int, library_id: int, shelf_id: int
+) -> tuple[Library, LibraryShelf]:
+    library = await _get(session, user_id, library_id)
+    try:
+        return library, await service.get_shelf(session, library, shelf_id)
+    except service.LibraryNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Étagère introuvable.") from None
+
+
+@router.patch(
+    "/{library_id}/shelves/{shelf_id}", summary="Renommer une étagère", responses=NOT_FOUND
+)
+async def rename_shelf(
+    user: CurrentUser, session: SessionDep, library_id: int, shelf_id: int, body: ShelfWrite
+) -> ShelfRead:
+    _, shelf = await _shelf(session, user.id, library_id, shelf_id)
+    await service.rename_shelf(session, shelf, body.name or None)
+    return ShelfRead.model_validate(shelf)
+
+
+@router.delete(
+    "/{library_id}/shelves/{shelf_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Supprimer une étagère (ses objets glissent sur l'étagère voisine)",
+    responses={**NOT_FOUND, 409: {"description": "Dernière étagère"}},
+)
+async def delete_shelf(
+    user: CurrentUser, session: SessionDep, library_id: int, shelf_id: int
+) -> Response:
+    library, shelf = await _shelf(session, user.id, library_id, shelf_id)
+    try:
+        await service.delete_shelf(session, library, shelf)
+    except service.LastShelfError:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Un meuble garde au moins une étagère."
+        ) from None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put(
+    "/{library_id}/layout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Enregistrer le rangement (étagères et objets)",
+    responses={**NOT_FOUND, 422: {"description": "Rangement incomplet ou incohérent"}},
+)
+async def save_layout(
+    user: CurrentUser, session: SessionDep, library_id: int, body: LayoutWrite
+) -> Response:
+    library = await _get(session, user.id, library_id)
+    try:
+        await service.save_layout(
+            session, library, [(shelf.id, shelf.content_ids) for shelf in body.shelves]
+        )
+    except service.InvalidOrderError:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Le rangement doit contenir chaque étagère et chaque objet une seule fois.",
         ) from None
     return Response(status_code=status.HTTP_204_NO_CONTENT)

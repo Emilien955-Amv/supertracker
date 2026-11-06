@@ -17,7 +17,15 @@ from app.models.card import (
 )
 from app.models.content import Content, Episode
 from app.models.gamification import UserBadge, XpEvent
-from app.models.library import Library, LibraryItem, SortMode, ViewMode
+from app.models.library import (
+    ItemSize,
+    Library,
+    LibraryItem,
+    LibraryShelf,
+    SortMode,
+    ViewMode,
+    Wood,
+)
 from app.models.refresh_token import RefreshToken
 from app.models.tracking import EpisodeView, Tracking, TrackingStatus
 from app.models.user import User
@@ -33,8 +41,10 @@ __all__ = [
     "ContentPlatform",
     "Episode",
     "EpisodeView",
+    "ItemSize",
     "Library",
     "LibraryItem",
+    "LibraryShelf",
     "Rarity",
     "RefreshToken",
     "SortMode",
@@ -44,5 +54,6 @@ __all__ = [
     "UserBadge",
     "UserCard",
     "ViewMode",
+    "Wood",
     "XpEvent",
 ]

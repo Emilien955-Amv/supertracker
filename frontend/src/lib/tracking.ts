@@ -70,10 +70,13 @@ export type EpisodeRead = {
   watched: boolean;
 };
 
-export type ViewMode = "grid" | "shelf" | "list";
+export type ViewMode = "bookcase" | "grid" | "shelf" | "list";
+export type Wood = "oak" | "walnut" | "ebony" | "white";
+export type ItemSize = "small" | "medium" | "large";
 export type SortMode = "manual" | "alpha" | "category" | "recent";
 
 export const VIEW_MODE_LABELS: Record<ViewMode, string> = {
+  bookcase: "Meuble",
   grid: "Grille",
   shelf: "Étagère",
   list: "Liste",
@@ -103,6 +106,9 @@ export type Library = {
   name: string;
   color: string;
   view_mode: ViewMode;
+  wood: Wood;
+  wall: string;
+  item_size: ItemSize;
   sort_mode: SortMode;
   created_at: string;
   items_count: number;
@@ -112,12 +118,16 @@ export type Library = {
 
 export type LibraryItem = {
   content: ContentRead;
+  shelf_id: number | null;
   position: number;
   added_at: string;
   tracking_status: TrackingStatus | null;
 };
 
-export type LibraryDetail = Library & { items: LibraryItem[] };
+/** Une étagère du meuble. */
+export type Shelf = { id: number; name: string | null; position: number };
+
+export type LibraryDetail = Library & { shelves: Shelf[]; items: LibraryItem[] };
 
 /** Adresse de l'API de suivi d'un contenu. */
 export function trackingPath(item: { source: Source; kind: ContentKind; external_id: string }): string {

@@ -1,13 +1,14 @@
 """Cartes à collectionner : des PERSONNAGES, en boosters par thème.
 
-Raretés (probabilité par carte tirée) selon l'importance du personnage :
-    Commune      50 %    petits rôles
-    Peu commune  25 %    personnages récurrents
+Raretés (probabilité par carte tirée) selon l'importance du personnage,
+avec un personnage DIFFÉRENT à chaque rareté haute :
+    Divine        0,5 %  le héros (n° 1) — une seule par œuvre, non fabricable
+    Mythique      1 %    le n° 2 de l'histoire
+    Légendaire    3,5 %  les n° 3 et 4
+    Épique        7 %    les autres rôles principaux
     Rare         13 %    seconds rôles
-    Épique        7 %    rôles principaux
-    Légendaire    3,5 %  LE héros
-    Mythique      1 %    le héros, édition Mythique
-    Divine        0,5 %  le héros, édition Divine (impossible à fabriquer)
+    Peu commune  25 %    personnages récurrents
+    Commune      50 %    petits rôles
 
 Règles :
 - cartes de personnages uniquement (nom du personnage, jamais l'acteur) ;
@@ -105,8 +106,12 @@ CRAFT_COST = {
     Rarity.LEGENDARY: 250,
     Rarity.MYTHIC: 600,
 }
+# Les 4 personnages les plus importants ont chacun leur rareté haute
+# (n° 1 Divine, n° 2 Mythique, n° 3 et 4 Légendaires) ; ensuite, la rareté
+# dépend du rôle.
+TOP_RARITIES = [Rarity.DIVINE, Rarity.MYTHIC, Rarity.LEGENDARY, Rarity.LEGENDARY]
 ROLE_RARITY = {
-    CharacterRole.HERO: Rarity.LEGENDARY,
+    CharacterRole.HERO: Rarity.DIVINE,
     CharacterRole.MAIN: Rarity.EPIC,
     CharacterRole.SUPPORTING: Rarity.RARE,
     CharacterRole.RECURRING: Rarity.UNCOMMON,
@@ -220,6 +225,13 @@ def _now() -> datetime:
 # --- Création des cartes d'un contenu -----------------------------------------
 
 
+def rarity_for(rank: int, role: CharacterRole) -> Rarity:
+    """Rareté d'un personnage selon son rang d'importance (0 = le héros)."""
+    if rank < len(TOP_RARITIES):
+        return TOP_RARITIES[rank]
+    return ROLE_RARITY[role]
+
+
 async def ensure_cards(
     session: AsyncSession,
     http: httpx.AsyncClient,
@@ -269,11 +281,7 @@ async def ensure_cards(
         # carte déjà obtenue reste le même personnage.
         digest = hashlib.sha1(character.name.lower().encode(), usedforsecurity=False)
         key = f"char:{digest.hexdigest()[:16]}"
-        add(key, ROLE_RARITY[character.role], character, ROLE_LABELS[character.role])
-        if character.role == CharacterRole.HERO:
-            # Le héros existe aussi en éditions Mythique et Divine.
-            for edition, label in ((Rarity.MYTHIC, "Mythique"), (Rarity.DIVINE, "Divine")):
-                add(f"{key}:{edition}", edition, character, f"Édition {label}")
+        add(key, rarity_for(len(rows), character.role), character, ROLE_LABELS[character.role])
 
     if rows:
         statement = insert(Card).values(rows)
