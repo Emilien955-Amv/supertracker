@@ -100,7 +100,7 @@ export function BoosterReveal({ booster, onClose, onNext }: Props) {
         </p>
 
         <ul className="mt-6 grid grid-cols-3 gap-3 sm:grid-cols-5">
-          {booster.cards.map(({ card, is_new, fragments }, index) => {
+          {booster.cards.map(({ card, is_new }, index) => {
             const shaking = suspense && index === last;
             return (
               <li key={index}>
@@ -142,7 +142,7 @@ export function BoosterReveal({ booster, onClose, onNext }: Props) {
                     {is_new ? (
                       <span className="font-semibold text-ok">Nouvelle !</span>
                     ) : (
-                      <span className="text-muted">Doublon · +{fragments} 💎</span>
+                      <span className="text-muted">Doublon · à échanger</span>
                     )}
                   </p>
                 )}

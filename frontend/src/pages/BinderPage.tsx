@@ -11,7 +11,14 @@ import { ProgressBar } from "../components/ProgressBar";
 import { ApiError, apiFetch } from "../lib/api";
 import { KIND_LABELS, contentPath } from "../lib/catalog";
 import { RARITIES, RARITY_COLORS, RARITY_LABELS } from "../lib/cards";
-import type { BinderPage as BinderPageData, CardRead, CollectionCard, Mastery, Rarity } from "../lib/cards";
+import type {
+  BinderPage as BinderPageData,
+  CardRead,
+  CollectionCard,
+  Mastery,
+  Rarity,
+  RecycleResult,
+} from "../lib/cards";
 import { announceRewards } from "../lib/gamification";
 import { useApiResource } from "../lib/useApi";
 
@@ -62,6 +69,18 @@ export default function BinderPage() {
       setPage(await apiFetch<BinderPageData>(path));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Échec de la fabrication.");
+    }
+  }
+
+  async function recycle(card: CollectionCard) {
+    const extra = (card.copies ?? 1) - 1;
+    if (!window.confirm(`Recycler ${extra} doublon${extra > 1 ? "s" : ""} de « ${card.title} » en fragments ?`)) return;
+    setError(null);
+    try {
+      await apiFetch<RecycleResult>(`/api/cards/${card.id}/recycle`, { method: "POST", body: { count: extra } });
+      setPage(await apiFetch<BinderPageData>(path));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Échec du recyclage.");
     }
   }
 
@@ -168,7 +187,26 @@ export default function BinderPage() {
         {visible.map((card) => (
           <li key={card.id}>
             {card.owned ? (
-              <GameCard card={card} />
+              <>
+                <div className="relative">
+                  <GameCard card={card} />
+                  {(card.copies ?? 1) > 1 && (
+                    <span className="absolute bottom-1.5 right-1.5 rounded-full bg-accent px-1.5 text-xs font-bold text-white">
+                      ×{card.copies}
+                    </span>
+                  )}
+                </div>
+                {(card.copies ?? 1) > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => void recycle(card)}
+                    aria-label={`Recycler les doublons de ${card.title}`}
+                    className="mt-1 w-full rounded-md border border-border px-1 py-0.5 text-[11px] text-muted hover:text-text"
+                  >
+                    Recycler ♻️
+                  </button>
+                )}
+              </>
             ) : (
               <MissingCard card={card} fragments={page.fragments} onCraft={() => void craft(card)} />
             )}

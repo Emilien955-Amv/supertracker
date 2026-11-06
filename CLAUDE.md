@@ -50,7 +50,8 @@ Les tests backend utilisent la base dédiée `supertracker_test` (créée une fo
   Épique+ garantie au 20e booster sans.
 - **Boosters** : bienvenue, 1 toutes les 5 min (12 en réserve max), 1 par niveau,
   1 par film/série/anime terminé. Packs par genre et par plateforme.
-  Doublons → fragments → fabrication.
+  Doublons gardés (« ×N ») : échangés entre amis ou recyclés en fragments à la
+  demande (un exemplaire toujours gardé) → fabrication.
 - **Animes** : saisons AniList regroupées en une œuvre ; animes japonais
   uniquement via AniList.
 - **Profils** privés par défaut (RGPD), visibles des amis ou de tous si public.
@@ -61,7 +62,8 @@ Fait : socle, comptes, recherche + où regarder, suivi + bibliothèques (meuble 
 étagères), XP/succès, cartes, profils et amis (3a), catalogue resserré (100 séries,
 100 films dont sagas, 100 animes ; personnages de toutes les saisons, max 300),
 collections complètes (carte « Maître », titre, 500 XP, 5 boosters, succès),
-sondages (3 votes → l'œuvre entre au catalogue).
+sondages (3 votes → l'œuvre entre au catalogue), échanges de cartes entre amis
+(page /echanges, tout ou rien à l'acceptation) et recyclage des doublons.
 
 À faire, dans l'ordre (décidé le 2026-11-06) :
 
@@ -72,7 +74,7 @@ sondages (3 votes → l'œuvre entre au catalogue).
    dorée unique à l'œuvre, titre de profil (ex. « Roi des pirates »), boosters +
    XP bonus, succès spécial. **Sondages** : les utilisateurs demandent et votent
    pour les œuvres à ajouter au catalogue.
-2. **Échange de cartes** (3b) : garder ses doublons, les recycler en fragments à
+2. ✅ **Échange de cartes** (3b) : garder ses doublons, les recycler en fragments à
    la demande, proposer des échanges entre amis.
 3. **Accueil personnalisé** : suggestions du jour selon les goûts (changent chaque
    jour, jamais déjà vues), « À voir ce soir ». Visuel amélioré.

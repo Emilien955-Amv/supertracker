@@ -40,6 +40,8 @@ export type CardRead = {
 
 export type CollectionCard = CardRead & {
   owned: boolean;
+  /** Exemplaires possédés (2 et plus : doublons à échanger ou recycler). */
+  copies?: number;
   craft_cost: number | null;
 };
 
@@ -94,7 +96,13 @@ export type Collection = {
   free_booster_max_stock: number;
   themes: { theme: PackTheme; label: string; cards: number }[];
   stats: { rarity: Rarity; owned: number; total: number; chance_percent: number }[];
+  /** Exemplaires en trop, et les fragments qu'ils rapporteraient. */
+  duplicates?: number;
+  duplicates_value?: number;
 };
+
+/** Résultat d'un recyclage de doublons. */
+export type RecycleResult = { recycled: number; gained: number; fragments: number };
 
 /** Œuvre telle que présentée dans le classeur. */
 export type BinderContent = CardRead["content"] & { poster_url: string | null; year: number | null };

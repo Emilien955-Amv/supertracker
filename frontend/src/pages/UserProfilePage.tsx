@@ -1,4 +1,4 @@
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 
 import { Avatar } from "../components/Avatar";
 import { FriendButton } from "../components/FriendButton";
@@ -49,6 +49,14 @@ export default function UserProfilePage() {
           onChange={(relation) => setProfile({ ...profile, relation })}
         />
       </header>
+      {profile.relation === "friends" && (
+        <Link
+          to={`/echanges/nouveau/${profile.username}`}
+          className="block rounded-xl border border-accent/50 bg-accent/10 p-3 text-center font-semibold hover:bg-accent/20"
+        >
+          🔁 Proposer un échange de cartes
+        </Link>
+      )}
 
       {!profile.visible ? (
         <p className="rounded-xl border border-border bg-surface p-6 text-center text-muted">

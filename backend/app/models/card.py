@@ -61,9 +61,11 @@ class Card(Base):
 
 
 class UserCard(Base):
-    """Carte possédée par un joueur (les doublons deviennent des fragments)."""
+    """Carte possédée par un joueur, avec son nombre d'exemplaires (doublons
+    gardés pour les échanger, ou les recycler en fragments)."""
 
     __tablename__ = "user_cards"
+    __table_args__ = (CheckConstraint("copies >= 1", name="copies_positive"),)
 
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
@@ -71,6 +73,7 @@ class UserCard(Base):
     card_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True, index=True
     )
+    copies: Mapped[int] = mapped_column(Integer, server_default="1")
     obtained_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

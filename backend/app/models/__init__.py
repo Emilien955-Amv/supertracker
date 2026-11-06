@@ -31,6 +31,7 @@ from app.models.mastery import Mastery
 from app.models.refresh_token import RefreshToken
 from app.models.request import RequestStatus, WorkRequest, WorkRequestVote
 from app.models.tracking import EpisodeView, Tracking, TrackingStatus
+from app.models.trade import Trade, TradeItem, TradeStatus
 from app.models.user import User
 
 __all__ = [
@@ -55,6 +56,9 @@ __all__ = [
     "RefreshToken",
     "RequestStatus",
     "SortMode",
+    "Trade",
+    "TradeItem",
+    "TradeStatus",
     "Tracking",
     "TrackingStatus",
     "User",

@@ -577,19 +577,24 @@ async def open_booster(
     drawn = draw(pool, wallet.boosters_since_epic, rng or secrets.SystemRandom())
 
     ids = [card_id for card_id, _ in drawn]
-    owned = set(
-        await session.scalars(
-            select(UserCard.card_id).where(UserCard.user_id == user_id, UserCard.card_id.in_(ids))
+    owned = {
+        user_card.card_id: user_card
+        for user_card in await session.scalars(
+            select(UserCard)
+            .where(UserCard.user_id == user_id, UserCard.card_id.in_(ids))
+            .with_for_update()
         )
-    )
+    }
     results: list[tuple[int, bool, int]] = []
-    for position, (card_id, rarity) in enumerate(drawn):
+    for position, (card_id, _rarity) in enumerate(drawn):
         duplicate = card_id in owned
-        fragments = DUPLICATE_FRAGMENTS[rarity] if duplicate else 0
-        if not duplicate:
-            session.add(UserCard(user_id=user_id, card_id=card_id))
-            owned.add(card_id)
-        wallet.fragments += fragments
+        # Doublon : un exemplaire de plus, à échanger ou à recycler plus tard.
+        fragments = 0
+        if duplicate:
+            owned[card_id].copies += 1
+        else:
+            owned[card_id] = UserCard(user_id=user_id, card_id=card_id, copies=1)
+            session.add(owned[card_id])
         session.add(
             BoosterCard(
                 booster_id=booster.id,
@@ -637,6 +642,7 @@ class CollectionEntry:
     card: Card
     content: Content
     owned: bool
+    copies: int = 0  # exemplaires possédés (2 et plus : doublons)
 
 
 @dataclass
@@ -683,14 +689,11 @@ async def binder_page(
             select(Card).where(Card.content_id == content_id).order_by(order.desc(), Card.title)
         )
     )
-    owned = set(
-        await session.scalars(
-            select(UserCard.card_id).where(
-                UserCard.user_id == user_id, UserCard.card_id.in_([c.id for c in cards])
-            )
-        )
-    )
-    return content, [CollectionEntry(card=c, content=content, owned=c.id in owned) for c in cards]
+    copies = await _copies(session, user_id, [c.id for c in cards])
+    return content, [
+        CollectionEntry(card=c, content=content, owned=c.id in copies, copies=copies.get(c.id, 0))
+        for c in cards
+    ]
 
 
 async def catalog_stats(
@@ -844,18 +847,15 @@ async def pack_cards(
             )
         ).tuples()
     )
-    owned = set(
-        await session.scalars(
-            select(UserCard.card_id).where(
-                UserCard.user_id == user_id, UserCard.card_id.in_([c.id for c, _ in rows])
-            )
-        )
-    )
+    copies = await _copies(session, user_id, [c.id for c, _ in rows])
     return PackPage(
         total=sum(by_rarity.values()),
         matching=int(matching or 0),
         by_rarity=by_rarity,
-        entries=[CollectionEntry(card=c, content=ct, owned=c.id in owned) for c, ct in rows],
+        entries=[
+            CollectionEntry(card=c, content=ct, owned=c.id in copies, copies=copies.get(c.id, 0))
+            for c, ct in rows
+        ],
     )
 
 
@@ -913,3 +913,61 @@ async def masteries_of(session: AsyncSession, user_id: int) -> list[tuple[Master
         .order_by(Mastery.completed_at.desc())
     )
     return list(rows.tuples())
+
+
+# --- Exemplaires et recyclage des doublons --------------------------------------------
+
+
+async def _copies(session: AsyncSession, user_id: int, card_ids: list[int]) -> dict[int, int]:
+    """Nombre d'exemplaires possédés de chaque carte (absente : non possédée)."""
+    if not card_ids:
+        return {}
+    rows = await session.execute(
+        select(UserCard.card_id, UserCard.copies).where(
+            UserCard.user_id == user_id, UserCard.card_id.in_(card_ids)
+        )
+    )
+    return dict(rows.tuples().all())
+
+
+async def duplicates_summary(session: AsyncSession, user_id: int) -> tuple[int, int]:
+    """Nombre de doublons (exemplaires en trop) et fragments qu'ils rapporteraient."""
+    rows = await session.execute(
+        select(Card.rarity, func.sum(UserCard.copies - 1))
+        .join(Card, Card.id == UserCard.card_id)
+        .where(UserCard.user_id == user_id, UserCard.copies > 1)
+        .group_by(Card.rarity)
+    )
+    count = value = 0
+    for rarity, extra in rows.tuples():
+        count += int(extra)
+        value += int(extra) * DUPLICATE_FRAGMENTS[Rarity(rarity)]
+    return count, value
+
+
+async def recycle(
+    session: AsyncSession, user_id: int, card_id: int | None = None, count: int = 1
+) -> tuple[int, int, int]:
+    """Recycle des doublons en fragments : un seul exemplaire est toujours gardé.
+
+    card_id=None : tous les doublons de la collection. Renvoie (doublons
+    recyclés, fragments gagnés, nouveau solde).
+    """
+    query = (
+        select(UserCard, Card.rarity)
+        .join(Card, Card.id == UserCard.card_id)
+        .where(UserCard.user_id == user_id, UserCard.copies > 1)
+        .with_for_update(of=UserCard)
+    )
+    if card_id is not None:
+        query = query.where(UserCard.card_id == card_id)
+    recycled = gained = 0
+    for user_card, rarity in (await session.execute(query)).tuples():
+        extra = user_card.copies - 1 if card_id is None else min(count, user_card.copies - 1)
+        user_card.copies -= extra
+        recycled += extra
+        gained += extra * DUPLICATE_FRAGMENTS[Rarity(rarity)]
+    wallet = await _wallet(session, user_id, lock=True)
+    wallet.fragments += gained
+    await session.commit()
+    return recycled, gained, wallet.fragments

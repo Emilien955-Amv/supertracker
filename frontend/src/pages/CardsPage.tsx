@@ -13,7 +13,14 @@ import {
   RARITY_LABELS,
   THEME_ICONS,
 } from "../lib/cards";
-import type { BoosterOpened, Collection, GenreTheme, PackTheme, PlatformTheme } from "../lib/cards";
+import type {
+  BoosterOpened,
+  Collection,
+  GenreTheme,
+  PackTheme,
+  PlatformTheme,
+  RecycleResult,
+} from "../lib/cards";
 import { useApiResource } from "../lib/useApi";
 
 /** Page des cartes : boosters (par genre ou plateforme), progression, classeur. */
@@ -58,6 +65,20 @@ export default function CardsPage() {
       setError(err instanceof Error ? err.message : "Échec de l'ouverture.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function recycleAll() {
+    const count = collection.duplicates ?? 0;
+    const value = collection.duplicates_value ?? 0;
+    if (!window.confirm(`Recycler vos ${count} doublons en ${value} fragments ? Un exemplaire de chaque carte est gardé.`)) return;
+    setError(null);
+    try {
+      await apiFetch<RecycleResult>("/api/cards/recycle-duplicates", { method: "POST" });
+      setBinderKey((k) => k + 1);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Échec du recyclage.");
     }
   }
 
@@ -159,6 +180,33 @@ export default function CardsPage() {
             );
           })}
         </ul>
+      </section>
+
+      <section aria-labelledby="doublons" className="mt-6 rounded-xl border border-border bg-surface p-4">
+        <h2 id="doublons" className="font-semibold">
+          🔁 Doublons : {collection.duplicates ?? 0}
+        </h2>
+        <p className="mt-1 text-sm text-muted">
+          Gardez-les pour les échanger avec vos amis, ou recyclez-les en fragments pour fabriquer les cartes
+          qui vous manquent.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link
+            to="/echanges"
+            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-white"
+          >
+            Mes échanges
+          </Link>
+          {(collection.duplicates ?? 0) > 0 && (
+            <button
+              type="button"
+              onClick={() => void recycleAll()}
+              className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-bg"
+            >
+              Tout recycler (+{collection.duplicates_value ?? 0} 💎)
+            </button>
+          )}
+        </div>
       </section>
 
       <Link

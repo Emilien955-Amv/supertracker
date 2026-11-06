@@ -18,6 +18,8 @@ import UserProfilePage from "./pages/UserProfilePage";
 import RegisterPage from "./pages/RegisterPage";
 import SearchPage from "./pages/SearchPage";
 import TrackingListPage from "./pages/TrackingListPage";
+import TradeComposePage from "./pages/TradeComposePage";
+import TradesPage from "./pages/TradesPage";
 
 /** Table des routes : quelle page afficher pour quelle adresse. */
 export function AppRoutes() {
@@ -46,6 +48,8 @@ export function AppRoutes() {
         <Route path="/cartes/pack/:theme" element={<PackPage />} />
         <Route path="/cartes/oeuvre/:id" element={<BinderPage />} />
         <Route path="/cartes/demandes" element={<RequestsPage />} />
+        <Route path="/echanges" element={<TradesPage />} />
+        <Route path="/echanges/nouveau/:username" element={<TradeComposePage />} />
       </Route>
 
       <Route

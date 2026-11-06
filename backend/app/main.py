@@ -22,6 +22,7 @@ from app.api import (
     libraries,
     requests,
     tracking,
+    trades,
     users,
 )
 from app.cache import redis_client
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
         cards.router,
         friends.router,
         requests.router,
+        trades.router,
     ):
         app.include_router(router, prefix="/api")
     return app

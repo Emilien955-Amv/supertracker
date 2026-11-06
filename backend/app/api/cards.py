@@ -24,6 +24,8 @@ from app.schemas.cards import (
     PackContents,
     RarityCount,
     RarityStat,
+    RecycleRequest,
+    RecycleResult,
     ThemeRead,
 )
 from app.schemas.gamification import RewardsRead
@@ -41,6 +43,7 @@ async def my_collection(
     await service.sync_boosters(session, user.id)  # bienvenue, niveaux, minuteur
     wallet = await service.wallet_state(session, user.id)
     owned, totals, themes = await service.catalog_stats(session, user.id)
+    duplicates, duplicates_value = await service.duplicates_summary(session, user.id)
     total_weight = sum(service.WEIGHTS.values())
     return CollectionRead(
         boosters=await service.count_boosters(session, user.id),
@@ -49,6 +52,8 @@ async def my_collection(
         next_free_booster_in=await service.timer_status(session, user.id),
         free_booster_minutes=service.TIMER_SECONDS // 60,
         free_booster_max_stock=service.TIMER_MAX_STOCK,
+        duplicates=duplicates,
+        duplicates_value=duplicates_value,
         themes=[
             ThemeRead(theme=theme, label=service.THEME_LABELS[theme], cards=themes[theme])
             for theme in service.PackTheme
@@ -135,6 +140,7 @@ async def binder_page(user: CurrentUser, session: SessionDep, content_id: int) -
             CollectionCard(
                 **CardRead.of(e.card, e.content).model_dump(),
                 owned=e.owned,
+                copies=e.copies,
                 craft_cost=service.CRAFT_COST.get(Rarity(e.card.rarity)),
             )
             for e in entries
@@ -165,6 +171,7 @@ async def pack_contents(
             CollectionCard(
                 **CardRead.of(e.card, e.content).model_dump(),
                 owned=e.owned,
+                copies=e.copies,
                 craft_cost=service.CRAFT_COST.get(Rarity(e.card.rarity)),
             )
             for e in page.entries
@@ -241,3 +248,20 @@ async def craft(user: CurrentUser, session: SessionDep, card_id: int) -> CraftRe
     return CraftResult(
         card=CardRead.of(card, content), fragments=fragments, masteries=_new_masteries(masteries)
     )
+
+
+@router.post("/recycle-duplicates", summary="Recycler tous mes doublons en fragments")
+async def recycle_all(user: CurrentUser, session: SessionDep) -> RecycleResult:
+    recycled, gained, fragments = await service.recycle(session, user.id)
+    return RecycleResult(recycled=recycled, gained=gained, fragments=fragments)
+
+
+@router.post(
+    "/{card_id}/recycle", summary="Recycler des doublons d'une carte (un exemplaire reste)"
+)
+async def recycle_one(
+    user: CurrentUser, session: SessionDep, card_id: int, body: RecycleRequest | None = None
+) -> RecycleResult:
+    count = body.count if body else 1
+    recycled, gained, fragments = await service.recycle(session, user.id, card_id, count)
+    return RecycleResult(recycled=recycled, gained=gained, fragments=fragments)

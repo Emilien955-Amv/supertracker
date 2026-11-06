@@ -133,20 +133,43 @@ async def test_suivre_une_oeuvre_ne_l_ajoute_pas_au_catalogue(
 
 
 @pytest.mark.integration
-async def test_doublons_en_fragments(db_client: AsyncClient, contexte: Contexte) -> None:
+async def test_doublons_gardes_puis_recycles(db_client: AsyncClient, contexte: Contexte) -> None:
     await remplir_catalogue(contexte)
     await offrir_boosters(contexte, 2)
 
-    fragments = 0
+    doublons = 0
     for _ in range(3):
         booster = await ouvrir(db_client, "movie")
         for tirage in booster["cards"]:
-            if not tirage["is_new"]:
-                assert tirage["fragments"] > 0
-                fragments += tirage["fragments"]
-    # 15 cartes tirées parmi 10 cartes de films : forcément des doublons.
-    assert fragments > 0
-    assert (await collection(db_client))["fragments"] == fragments
+            assert tirage["fragments"] == 0  # plus de fragments automatiques
+            doublons += not tirage["is_new"]
+    # 15 cartes tirées parmi 10 cartes de films : forcément des doublons, gardés.
+    moi = await collection(db_client)
+    assert doublons > 0
+    assert (moi["duplicates"], moi["fragments"]) == (doublons, 0)
+    valeur = moi["duplicates_value"]
+    assert valeur > 0
+
+    # Recycler une carte en double : un exemplaire reste toujours.
+    cartes = []
+    for entree in (await db_client.get("/api/cards/binder")).json():
+        page = (await db_client.get(f"/api/cards/binder/{entree['content']['id']}")).json()
+        cartes += page["cards"]
+    possedees = sum(c["owned"] for c in cartes)
+    en_double = next(c for c in cartes if c["copies"] >= 2)
+    resultat = (await db_client.post(f"/api/cards/{en_double['id']}/recycle")).json()
+    assert resultat["recycled"] == 1
+    # Tout le reste d'un coup.
+    reste = (await db_client.post("/api/cards/recycle-duplicates")).json()
+    assert resultat["recycled"] + reste["recycled"] == doublons
+    assert resultat["gained"] + reste["gained"] == valeur
+    assert reste["fragments"] == valeur
+    moi = await collection(db_client)
+    assert (moi["duplicates"], moi["fragments"]) == (0, valeur)
+    # Plus rien à recycler, et aucune carte perdue.
+    assert (await db_client.post("/api/cards/recycle-duplicates")).json()["recycled"] == 0
+    classeur = (await db_client.get("/api/cards/binder")).json()
+    assert sum(e["owned"] for e in classeur) == possedees
 
 
 @pytest.mark.integration

@@ -172,7 +172,7 @@ describe("Cartes", () => {
     try {
       fireEvent.click(within(fenetre).getByRole("button", { name: "Tout retourner" }));
       // Les 4 premières sont retournées ; la dernière se fait attendre…
-      expect(within(fenetre).getAllByText("Doublon · +1 💎")).toHaveLength(4);
+      expect(within(fenetre).getAllByText("Doublon · à échanger")).toHaveLength(4);
       expect(within(fenetre).getByText(/Quelque chose de rare arrive/)).toBeTruthy();
       expect(within(fenetre).getByRole("button", { name: "Retourner la carte 5" })).toBeTruthy();
 

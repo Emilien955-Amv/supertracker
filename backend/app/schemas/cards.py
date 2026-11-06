@@ -48,6 +48,7 @@ class CardRead(BaseModel):
 
 class CollectionCard(CardRead):
     owned: bool
+    copies: int = 0  # exemplaires possédés (2 et plus : doublons)
     # Coût en fragments (None : impossible à fabriquer, ex. Divine).
     craft_cost: int | None
 
@@ -75,6 +76,8 @@ class CollectionRead(BaseModel):
     free_booster_max_stock: int
     themes: list[ThemeRead]
     stats: list[RarityStat]
+    duplicates: int = 0  # exemplaires en trop (à échanger ou recycler)
+    duplicates_value: int = 0  # fragments qu'ils rapporteraient
 
 
 class OpenRequest(BaseModel):
@@ -152,3 +155,13 @@ class BinderPageRead(BaseModel):
     fragments: int
     cards: list[CollectionCard]
     mastery: MasteryRead | None = None
+
+
+class RecycleRequest(BaseModel):
+    count: int = Field(default=1, ge=1, le=1000)
+
+
+class RecycleResult(BaseModel):
+    recycled: int  # doublons transformés
+    gained: int  # fragments gagnés
+    fragments: int  # nouveau solde
