@@ -27,6 +27,7 @@ from app.models.library import (
     ViewMode,
     Wood,
 )
+from app.models.mastery import Mastery
 from app.models.refresh_token import RefreshToken
 from app.models.tracking import EpisodeView, Tracking, TrackingStatus
 from app.models.user import User
@@ -48,6 +49,7 @@ __all__ = [
     "Library",
     "LibraryItem",
     "LibraryShelf",
+    "Mastery",
     "Rarity",
     "RefreshToken",
     "SortMode",

@@ -59,4 +59,5 @@ class UserRead(BaseModel):
     avatar_url: str | None
     bio: str | None
     is_public: bool
+    title: str | None = None  # titre gagné en complétant une collection
     created_at: datetime

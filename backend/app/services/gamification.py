@@ -25,6 +25,7 @@ from app.models import (
     Episode,
     EpisodeView,
     Library,
+    Mastery,
     Tracking,
     TrackingStatus,
     UserBadge,
@@ -42,6 +43,8 @@ MARATHON_XP = 40  # au moins MARATHON_EPISODES épisodes dans la journée
 MARATHON_EPISODES = 5
 DISCOVERY_XP = 15  # premier épisode d'une nouvelle série
 COMPLETION_XP = 100  # série ou anime terminé
+MASTERY_XP = 500  # toutes les cartes d'une œuvre
+MASTERY_BOOSTERS = 5
 DAILY_CAP = 300  # plafond quotidien des XP de visionnage
 STREAK_STEP_PERCENT = 5  # +5 % par jour d'affilée…
 STREAK_MAX_PERCENT = 50  # … jusqu'à +50 %
@@ -55,6 +58,7 @@ class XpKind(StrEnum):
     DISCOVERY = "discovery"
     COMPLETION = "completion"
     BADGE = "badge"
+    MASTERY = "mastery"
 
 
 LABELS = {
@@ -65,6 +69,7 @@ LABELS = {
     XpKind.DISCOVERY: "Nouvelle série",
     XpKind.COMPLETION: "Série terminée",
     XpKind.BADGE: "Succès débloqué",
+    XpKind.MASTERY: "Collection complète",
 }
 
 # Seuls ces gains comptent dans le plafond quotidien et la série de jours.
@@ -214,6 +219,8 @@ async def _metric(session: AsyncSession, user_id: int, metric: Metric) -> int:
             query = events.where(XpEvent.kind == XpKind.MARATHON)
         case Metric.JOUR_J:
             query = events.where(XpEvent.kind == XpKind.JOUR_J)
+        case Metric.MASTERIES:
+            query = select(func.count()).select_from(Mastery).where(Mastery.user_id == user_id)
         case Metric.STREAK:
             return await streak_days(session, user_id)
         case Metric.LEVEL:
@@ -398,6 +405,15 @@ async def forget_content(session: AsyncSession, user_id: int, content_id: int) -
             XpEvent.kind.in_([XpKind.EPISODE, XpKind.JOUR_J, XpKind.MOVIE, XpKind.COMPLETION]),
         )
     )
+
+
+async def on_mastery(session: AsyncSession, user_id: int, content_id: int) -> Rewards:
+    """Collection complète : 500 XP, 5 boosters, et les succès de collectionneur."""
+    game = await _Session(session, user_id).start()
+    await game.award(f"mastery:{content_id}", XpKind.MASTERY, MASTERY_XP, content_id)
+    for number in range(MASTERY_BOOSTERS):
+        await game.booster(f"mastery:{content_id}:{number}")
+    return await game.finish()
 
 
 async def check_badges(session: AsyncSession, user_id: int) -> Rewards:

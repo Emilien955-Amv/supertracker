@@ -32,7 +32,7 @@ import hashlib
 import random
 import secrets
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
@@ -52,6 +52,7 @@ from app.models import (
     CardWallet,
     Content,
     ContentPlatform,
+    Mastery,
     Rarity,
     Tracking,
     TrackingStatus,
@@ -65,6 +66,7 @@ from app.providers.base import (
     ProviderError,
 )
 from app.services import catalog, gamification
+from app.services.titles import title_for
 
 log = structlog.get_logger()
 
@@ -501,6 +503,7 @@ class OpenResult:
     cards: list[DrawnCard]
     fragments: int
     boosters_left: int
+    masteries: list["MasteryResult"] = field(default_factory=list)
 
 
 async def open_booster(
@@ -563,6 +566,13 @@ async def open_booster(
     wallet.boosters_since_epic = 0 if got_epic else wallet.boosters_since_epic + 1
     booster.opened_at = _now()
     await session.commit()
+    new_contents = {
+        content_id
+        for content_id in await session.scalars(
+            select(Card.content_id).where(Card.id.in_([cid for cid, new, _ in results if new]))
+        )
+    }
+    masteries = await check_masteries(session, user_id, new_contents)
 
     rows = await session.execute(
         select(Card, Content).join(Content, Content.id == Card.content_id).where(Card.id.in_(ids))
@@ -576,6 +586,7 @@ async def open_booster(
         ],
         fragments=wallet.fragments,
         boosters_left=await count_boosters(session, user_id),
+        masteries=masteries,
     )
 
 
@@ -710,7 +721,9 @@ async def wallet_state(session: AsyncSession, user_id: int) -> CardWallet:
     return wallet
 
 
-async def craft(session: AsyncSession, user_id: int, card_id: int) -> tuple[Card, Content, int]:
+async def craft(
+    session: AsyncSession, user_id: int, card_id: int
+) -> tuple[Card, Content, int, list["MasteryResult"]]:
     """Fabrique une carte manquante avec des fragments. Renvoie le solde restant."""
     row = (
         await session.execute(
@@ -736,7 +749,9 @@ async def craft(session: AsyncSession, user_id: int, card_id: int) -> tuple[Card
     wallet.fragments -= cost
     session.add(UserCard(user_id=user_id, card_id=card_id))
     await session.commit()
-    return card, content, wallet.fragments
+    remaining = wallet.fragments
+    masteries = await check_masteries(session, user_id, {content.id})
+    return card, content, remaining, masteries
 
 
 @dataclass
@@ -803,3 +818,59 @@ async def pack_cards(
         by_rarity=by_rarity,
         entries=[CollectionEntry(card=c, content=ct, owned=c.id in owned) for c, ct in rows],
     )
+
+
+# --- Collections complètes (maîtrises) ----------------------------------------------
+
+
+@dataclass
+class MasteryResult:
+    content: Content
+    title: str  # titre de profil débloqué (ex. « Roi des pirates »)
+    rewards: gamification.Rewards
+
+
+async def check_masteries(
+    session: AsyncSession, user_id: int, content_ids: set[int]
+) -> list[MasteryResult]:
+    """Enregistre les collections que le joueur vient de compléter (une seule
+    fois chacune) et donne leurs récompenses."""
+    results: list[MasteryResult] = []
+    for content_id in sorted(content_ids):
+        total = await session.scalar(
+            select(func.count()).select_from(Card).where(Card.content_id == content_id)
+        )
+        owned = await session.scalar(
+            select(func.count())
+            .select_from(UserCard)
+            .join(Card, Card.id == UserCard.card_id)
+            .where(UserCard.user_id == user_id, Card.content_id == content_id)
+        )
+        if not total or (owned or 0) < total:
+            continue
+        created = await session.scalar(
+            insert(Mastery)
+            .values(user_id=user_id, content_id=content_id)
+            .on_conflict_do_nothing()
+            .returning(Mastery.content_id)
+        )
+        if created is None:
+            continue  # déjà complétée auparavant
+        rewards = await gamification.on_mastery(session, user_id, content_id)
+        content = await session.get(Content, content_id)
+        assert content is not None  # noqa: S101 (la carte existe, donc l'œuvre aussi)
+        results.append(
+            MasteryResult(content=content, title=title_for(content.title), rewards=rewards)
+        )
+    await session.commit()
+    return results
+
+
+async def masteries_of(session: AsyncSession, user_id: int) -> list[tuple[Mastery, Content]]:
+    rows = await session.execute(
+        select(Mastery, Content)
+        .join(Content, Content.id == Mastery.content_id)
+        .where(Mastery.user_id == user_id)
+        .order_by(Mastery.completed_at.desc())
+    )
+    return list(rows.tuples())

@@ -2,6 +2,7 @@ import { useParams } from "react-router";
 
 import { Avatar } from "../components/Avatar";
 import { FriendButton } from "../components/FriendButton";
+import { MasterCard } from "../components/MasterCard";
 import { RARITY_COLORS, RARITY_LABELS } from "../lib/cards";
 import { formatDate } from "../lib/catalog";
 import { TIER_STYLES } from "../lib/gamification";
@@ -36,6 +37,7 @@ export default function UserProfilePage() {
         <Avatar username={profile.username} size="h-16 w-16 text-2xl" />
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-2xl font-bold">{profile.username}</h1>
+          {profile.title && <p className="text-sm font-semibold text-gold">🏆 {profile.title}</p>}
           {stats && <p className="text-sm text-muted">Niveau {stats.level} · {stats.xp} XP</p>}
           {profile.member_since && (
             <p className="text-xs text-muted">Membre depuis le {formatDate(profile.member_since.slice(0, 10))}</p>
@@ -81,6 +83,22 @@ export default function UserProfilePage() {
                   </li>
                 ))}
               </ul>
+              {(stats.masteries ?? []).length > 0 && (
+                <section aria-labelledby="maitrises">
+                  <h2 id="maitrises" className="font-semibold">
+                    Collections complètes ({stats.masteries!.length})
+                  </h2>
+                  <ul className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-5">
+                    {stats.masteries!.map((m) => (
+                      <li key={m.work_title}>
+                        <MasterCard
+                          mastery={{ ...m, content_id: 0, completed_at: null, rewards: null }}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
               <section aria-labelledby="succes-ami">
                 <h2 id="succes-ami" className="font-semibold">
                   Succès ({stats.badges.length})

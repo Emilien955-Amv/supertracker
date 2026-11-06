@@ -407,3 +407,77 @@ def test_un_personnage_different_par_rarete_haute() -> None:
     ]
     assert rarity_for(10, Role.SUPPORTING) == Rarity.RARE
     assert rarity_for(30, Role.BACKGROUND) == Rarity.COMMON
+
+
+def test_titres_de_profil() -> None:
+    from app.services.titles import title_for
+
+    assert title_for("ONE PIECE") == "Roi des pirates"
+    assert title_for("Naruto Shippuden") == "Hokage"
+    assert title_for("Harry Potter") == "Grand sorcier"
+    assert title_for("Le Seigneur des anneaux") == "Porteur de l'Anneau"
+    assert title_for("Matrix") == "Maître de Matrix"
+
+
+@pytest.mark.integration
+async def test_collection_complete(db_client: AsyncClient, contexte: Contexte) -> None:
+    from sqlalchemy import select
+
+    from app.models import Card, Content, UserCard
+
+    await remplir_catalogue(contexte)
+    matrix = await contexte.session.scalar(select(Content).where(Content.external_id == "603"))
+    assert matrix is not None
+    cartes = list(await contexte.session.scalars(select(Card).where(Card.content_id == matrix.id)))
+    # Alice possède déjà toutes les cartes de Matrix sauf une (fabricable).
+    derniere = next(c for c in cartes if c.rarity != "divine")
+    contexte.session.add_all(
+        UserCard(user_id=contexte.alice.id, card_id=c.id) for c in cartes if c.id != derniere.id
+    )
+    await contexte.session.execute(
+        update(CardWallet).where(CardWallet.user_id == contexte.alice.id).values(fragments=1000)
+    )
+    await collection(db_client)  # crée le portefeuille
+    await contexte.session.execute(
+        update(CardWallet).where(CardWallet.user_id == contexte.alice.id).values(fragments=1000)
+    )
+    await contexte.session.commit()
+
+    fabrique = (await db_client.post(f"/api/cards/{derniere.id}/craft")).json()
+
+    [maitrise] = fabrique["masteries"]
+    assert (maitrise["work_title"], maitrise["title"]) == ("Matrix", "Maître de Matrix")
+    gains = {line["label"]: line["amount"] for line in maitrise["rewards"]["lines"]}
+    assert gains["Collection complète"] == 500
+    # 5 boosters de collection (+ ceux des niveaux gagnés grâce aux 500 XP).
+    assert maitrise["rewards"]["boosters"] >= 5
+    assert "maitre_collection" in [b["code"] for b in maitrise["rewards"]["badges"]]
+
+    # Classeur et page de l'œuvre : la carte « Maître » est là.
+    classeur = (await db_client.get("/api/cards/binder")).json()
+    assert next(p for p in classeur if p["content"]["id"] == matrix.id)["mastered"] is True
+    page = (await db_client.get(f"/api/cards/binder/{matrix.id}")).json()
+    assert page["mastery"]["title"] == "Maître de Matrix"
+
+    # Le titre s'affiche sur le profil, une fois choisi.
+    moi = (await db_client.patch("/api/users/me", json={"title_content_id": matrix.id})).json()
+    assert moi["title"] == "Maître de Matrix"
+    assert (await db_client.get("/api/users/me")).json()["title"] == "Maître de Matrix"
+    # Et s'enlève avec null.
+    assert (await db_client.patch("/api/users/me", json={"title_content_id": None})).json()[
+        "title"
+    ] is None
+
+
+@pytest.mark.integration
+async def test_titre_non_merite_refuse(db_client: AsyncClient, contexte: Contexte) -> None:
+    await remplir_catalogue(contexte)
+    from sqlalchemy import select
+
+    from app.models import Content
+
+    pulp = await contexte.session.scalar(select(Content).where(Content.external_id == "680"))
+    assert pulp is not None
+    reponse = await db_client.patch("/api/users/me", json={"title_content_id": pulp.id})
+    assert reponse.status_code == 409
+    assert (await db_client.get("/api/cards/masteries")).json() == []

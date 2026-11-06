@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Identity, String, false, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Identity, String, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -26,6 +26,10 @@ class User(Base):
     avatar_url: Mapped[str | None] = mapped_column(String(500))
     # Petite présentation affichée sur le profil (facultative).
     bio: Mapped[str | None] = mapped_column(String(300))
+    # Titre affiché sous le pseudo : celui d'une œuvre complétée (None : aucun).
+    title_content_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("contents.id", ondelete="SET NULL")
+    )
 
     # Profil privé par défaut (protection des données dès la conception, RGPD).
     is_public: Mapped[bool] = mapped_column(Boolean, server_default=false())

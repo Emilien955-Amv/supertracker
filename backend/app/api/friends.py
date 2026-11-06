@@ -6,19 +6,21 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.rate_limit import enforce_rate_limit
-from app.models import Rarity, User
+from app.models import Mastery, Rarity, User
 from app.schemas.auth import UserRead
 from app.schemas.gamification import BadgeBrief
 from app.schemas.social import (
     FriendsRead,
+    MasteryBrief,
     ProfileRead,
     ProfileStatsRead,
     ProfileUpdate,
     PublicUser,
     RarityCount,
 )
-from app.services import social
+from app.services import cards, social
 from app.services.social import Relation
+from app.services.titles import title_for
 
 router = APIRouter(tags=["Social"])
 
@@ -46,9 +48,20 @@ async def update_me(user: CurrentUser, session: SessionDep, body: ProfileUpdate)
         user.bio = body.bio or None
     if body.is_public is not None:
         user.is_public = body.is_public
+    if "title_content_id" in body.model_fields_set:
+        # Seul le titre d'une collection réellement complétée peut être affiché.
+        if body.title_content_id is not None:
+            done = await session.get(Mastery, (user.id, body.title_content_id))
+            if done is None:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT, "Ce titre se gagne en complétant la collection."
+                )
+        user.title_content_id = body.title_content_id
     await session.commit()
     await session.refresh(user)
-    return UserRead.model_validate(user)
+    return UserRead.model_validate(user).model_copy(
+        update={"title": await social.title_of(session, user)}
+    )
 
 
 @router.get("/users/search", summary="Chercher des utilisateurs par pseudo")
@@ -78,9 +91,11 @@ async def profile(user: CurrentUser, session: SessionDep, username: str) -> Prof
         relation=rel,
         visible=visible,
         is_public=other.is_public,
+        title=await social.title_of(session, other),
     )
     if not visible:
         return result
+    masteries = await cards.masteries_of(session, other.id)
     stats = await social.profile_stats(session, other)
     return result.model_copy(
         update={
@@ -98,6 +113,12 @@ async def profile(user: CurrentUser, session: SessionDep, username: str) -> Prof
                     for r in (Rarity.DIVINE, Rarity.MYTHIC, Rarity.LEGENDARY)
                 ],
                 badges=[BadgeBrief.of(b) for b in stats.badges],
+                masteries=[
+                    MasteryBrief(
+                        work_title=c.title, poster_url=c.poster_url, title=title_for(c.title)
+                    )
+                    for _, c in masteries
+                ],
             ),
         }
     )

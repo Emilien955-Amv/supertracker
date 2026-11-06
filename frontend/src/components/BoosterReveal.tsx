@@ -4,6 +4,8 @@ import type { CSSProperties } from "react";
 import { RARITY_COLORS, RARITY_LABELS, isEpicReveal, isShiny } from "../lib/cards";
 import type { BoosterOpened, Rarity } from "../lib/cards";
 import { CardBack, GameCard } from "./GameCard";
+import { MasterCard } from "./MasterCard";
+import { announceRewards } from "../lib/gamification";
 
 // Durées de la révélation spéciale (dernière carte Légendaire ou mieux).
 const SUSPENSE_MS = 1800; // la carte tremble et s'illumine…
@@ -28,6 +30,11 @@ export function BoosterReveal({ booster, onClose, onNext }: Props) {
   const lastRarity = booster.cards[last]?.card.rarity;
   const special = lastRarity !== undefined && isEpicReveal(lastRarity);
   const allRevealed = revealed.every(Boolean);
+
+  // Récompenses des collections complétées (notification « +500 XP »…).
+  useEffect(() => {
+    if (allRevealed) for (const mastery of booster.masteries ?? []) announceRewards(mastery.rewards);
+  }, [allRevealed, booster.masteries]);
 
   useEffect(() => {
     title.current?.focus(); // le lecteur d'écran annonce la fenêtre
@@ -173,6 +180,22 @@ export function BoosterReveal({ booster, onClose, onNext }: Props) {
           </button>
         </div>
         <p className="mt-4 text-center text-sm text-muted">Fragments : {booster.fragments} 💎</p>
+
+        {/* Collection complétée grâce à ce booster : la carte « Maître » ! */}
+        {allRevealed && !banner && (booster.masteries ?? []).length > 0 && (
+          <section aria-label="Collection complète" className="mt-6 rounded-2xl border border-gold/60 bg-gold/10 p-4 text-center">
+            <p className="text-xl font-black text-gold">🏆 Collection complète !</p>
+            <ul className="mx-auto mt-3 grid max-w-sm grid-cols-2 gap-3">
+              {(booster.masteries ?? []).map((mastery) => (
+                <li key={mastery.content_id}>
+                  <MasterCard mastery={mastery} />
+                  <p className="mt-1 text-xs">Titre débloqué : « {mastery.title} »</p>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-muted">+500 XP et 5 boosters par collection. Choisissez votre titre dans Profil.</p>
+          </section>
+        )}
       </div>
 
       {/* Bannière « LÉGENDAIRE ! » par-dessus tout. */}

@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { useAuth } from "../auth/AuthContext";
 import type { User } from "../auth/AuthContext";
 import { apiFetch } from "../lib/api";
+import type { Mastery } from "../lib/cards";
 import { ProgressBar } from "../components/ProgressBar";
 import { TIER_LABELS, TIER_STYLES, levelPercent } from "../lib/gamification";
 import type { BadgeRead, Profile } from "../lib/gamification";
@@ -205,6 +206,7 @@ function SocialSettings() {
           </span>
         </span>
       </label>
+      <TitlePicker />
       <div className="mt-3 flex items-center justify-between gap-3">
         <Link to={`/u/${encodeURIComponent(user.username)}`} className="text-sm text-accent hover:underline">
           Voir mon profil comme les autres →
@@ -214,5 +216,45 @@ function SocialSettings() {
         </p>
       </div>
     </section>
+  );
+}
+
+
+/** Titre affiché sous le pseudo, parmi ceux des collections complétées. */
+function TitlePicker() {
+  const { state, updateUser } = useAuth();
+  const masteries = useApi<Mastery[]>("/api/cards/masteries");
+  if (state.status !== "authenticated" || masteries.status !== "success") return null;
+  const user = state.user;
+  const list = masteries.data;
+  const current = list.find((m) => m.title === user.title)?.content_id ?? "";
+
+  return (
+    <label className="mt-3 block text-sm">
+      <span className="text-muted">Mon titre</span>
+      {list.length === 0 ? (
+        <span className="mt-1 block text-xs text-muted">
+          Complétez la collection de cartes d'une œuvre pour gagner un titre (ex. « Roi des pirates »).
+        </span>
+      ) : (
+        <select
+          value={current}
+          onChange={(e) =>
+            void apiFetch<User>("/api/users/me", {
+              method: "PATCH",
+              body: { title_content_id: e.target.value ? Number(e.target.value) : null },
+            }).then(updateUser)
+          }
+          className="mt-1 block w-full rounded-lg border border-border bg-bg px-3 py-2"
+        >
+          <option value="">Aucun titre</option>
+          {list.map((m) => (
+            <option key={m.content_id} value={m.content_id}>
+              {m.title} ({m.work_title})
+            </option>
+          ))}
+        </select>
+      )}
+    </label>
   );
 }

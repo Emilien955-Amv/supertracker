@@ -1,5 +1,6 @@
 """Routes des cartes : collection, ouverture de boosters, fabrication."""
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -18,13 +19,17 @@ from app.schemas.cards import (
     CollectionRead,
     CraftResult,
     DrawnCardRead,
+    MasteryRead,
     OpenRequest,
     PackContents,
     RarityCount,
     RarityStat,
     ThemeRead,
 )
+from app.schemas.gamification import RewardsRead
 from app.services import cards as service
+from app.services.gamification import Rewards
+from app.services.titles import title_for
 
 router = APIRouter(prefix="/cards", tags=["Cartes"])
 
@@ -72,12 +77,40 @@ def _binder_content(content: Content) -> BinderContent:
     )
 
 
+def _mastery(
+    content: Content, completed_at: datetime | None = None, rewards: Rewards | None = None
+) -> MasteryRead:
+    return MasteryRead(
+        content_id=content.id,
+        work_title=content.title,
+        poster_url=content.poster_url,
+        title=title_for(content.title),
+        completed_at=completed_at,
+        rewards=RewardsRead.of(rewards) if rewards else None,
+    )
+
+
+def _new_masteries(masteries: list[service.MasteryResult]) -> list[MasteryRead]:
+    return [_mastery(m.content, rewards=m.rewards) for m in masteries]
+
+
 @router.get("/binder", summary="Mon classeur : une pochette par œuvre")
 async def my_binder(user: CurrentUser, session: SessionDep) -> list[BinderEntryRead]:
+    mastered = {c.id for _, c in await service.masteries_of(session, user.id)}
     return [
-        BinderEntryRead(content=_binder_content(e.content), owned=e.owned, total=e.total)
+        BinderEntryRead(
+            content=_binder_content(e.content),
+            owned=e.owned,
+            total=e.total,
+            mastered=e.content.id in mastered,
+        )
         for e in await service.binder(session, user.id)
     ]
+
+
+@router.get("/masteries", summary="Mes collections complètes (cartes « Maître » et titres)")
+async def my_masteries(user: CurrentUser, session: SessionDep) -> list[MasteryRead]:
+    return [_mastery(c, m.completed_at) for m, c in await service.masteries_of(session, user.id)]
 
 
 @router.get(
@@ -91,8 +124,12 @@ async def binder_page(user: CurrentUser, session: SessionDep, content_id: int) -
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Œuvre introuvable.")
     content, entries = page
     wallet = await service.wallet_state(session, user.id)
+    mastery = next(
+        (m for m, c in await service.masteries_of(session, user.id) if c.id == content.id), None
+    )
     return BinderPageRead(
         content=_binder_content(content),
+        mastery=_mastery(content, mastery.completed_at) if mastery else None,
         fragments=wallet.fragments,
         cards=[
             CollectionCard(
@@ -178,6 +215,7 @@ async def open_booster(
         ],
         fragments=results[-1].fragments,
         boosters_left=results[-1].boosters_left,
+        masteries=[m for result in results for m in _new_masteries(result.masteries)],
     )
 
 
@@ -191,7 +229,7 @@ async def open_booster(
 )
 async def craft(user: CurrentUser, session: SessionDep, card_id: int) -> CraftResult:
     try:
-        card, content, fragments = await service.craft(session, user.id, card_id)
+        card, content, fragments, masteries = await service.craft(session, user.id, card_id)
     except service.CardNotAvailableError:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, "Cette carte ne peut pas être fabriquée."
@@ -200,4 +238,6 @@ async def craft(user: CurrentUser, session: SessionDep, card_id: int) -> CraftRe
         raise HTTPException(status.HTTP_409_CONFLICT, "Vous avez déjà cette carte.") from None
     except service.NotEnoughFragmentsError:
         raise HTTPException(status.HTTP_409_CONFLICT, "Pas assez de fragments.") from None
-    return CraftResult(card=CardRead.of(card, content), fragments=fragments)
+    return CraftResult(
+        card=CardRead.of(card, content), fragments=fragments, masteries=_new_masteries(masteries)
+    )

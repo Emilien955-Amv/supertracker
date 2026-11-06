@@ -1,9 +1,12 @@
 """Formats d'échange des cartes."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from app.models import Card, CardKind, Content, Rarity
 from app.providers.base import ContentKind, Source
+from app.schemas.gamification import RewardsRead
 from app.services.cards import PackTheme
 
 
@@ -85,17 +88,31 @@ class DrawnCardRead(BaseModel):
     fragments: int  # fragments obtenus si c'est un doublon
 
 
+class MasteryRead(BaseModel):
+    """Une collection complète : la carte « Maître » et le titre débloqué."""
+
+    content_id: int
+    work_title: str
+    poster_url: str | None
+    title: str  # titre de profil (ex. « Roi des pirates »)
+    completed_at: datetime | None = None
+    # Récompenses (seulement au moment où la collection vient d'être complétée).
+    rewards: RewardsRead | None = None
+
+
 class BoosterOpened(BaseModel):
     theme: PackTheme
     boosters_opened: int = 1
     cards: list[DrawnCardRead]
     fragments: int
     boosters_left: int
+    masteries: list[MasteryRead] = []
 
 
 class CraftResult(BaseModel):
     card: CardRead
     fragments: int
+    masteries: list[MasteryRead] = []
 
 
 class RarityCount(BaseModel):
@@ -125,6 +142,7 @@ class BinderEntryRead(BaseModel):
     content: BinderContent
     owned: int
     total: int
+    mastered: bool = False
 
 
 class BinderPageRead(BaseModel):
@@ -133,3 +151,4 @@ class BinderPageRead(BaseModel):
     content: BinderContent
     fragments: int
     cards: list[CollectionCard]
+    mastery: MasteryRead | None = None

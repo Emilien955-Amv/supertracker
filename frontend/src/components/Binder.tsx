@@ -123,14 +123,21 @@ export function Binder() {
             {visible.length} œuvre{visible.length > 1 ? "s" : ""}
           </p>
           <ul className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-5">
-            {visible.map(({ content, owned, total }) => (
+            {visible.map(({ content, owned, total, mastered }) => (
               <li key={content.id}>
                 <Link
                   to={`/cartes/oeuvre/${content.id}`}
                   className="block rounded-xl border border-border bg-surface p-1.5 hover:border-accent/60"
                 >
                   <Poster url={content.poster_url} title={content.title} className="rounded-lg text-[9px]" />
-                  <p className="mt-1 truncate text-xs font-semibold">{content.title}</p>
+                  <p className="mt-1 truncate text-xs font-semibold">
+                    {mastered && (
+                      <span title="Collection complète" aria-label="Collection complète">
+                        🏆{" "}
+                      </span>
+                    )}
+                    {content.title}
+                  </p>
                   <p className="text-[10px] text-muted">
                     {KIND_LABELS[content.kind]} · {owned}/{total}
                   </p>

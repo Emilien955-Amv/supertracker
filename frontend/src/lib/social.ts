@@ -16,6 +16,7 @@ export type ProfileStats = {
   cards: number;
   top_cards: { rarity: Rarity; count: number }[];
   badges: BadgeBrief[];
+  masteries?: { work_title: string; poster_url: string | null; title: string }[];
 };
 
 export type UserProfile = {
@@ -25,6 +26,7 @@ export type UserProfile = {
   visible: boolean;
   is_public: boolean;
   bio: string | null;
+  title?: string | null;
   member_since: string | null;
   stats: ProfileStats | null;
 };

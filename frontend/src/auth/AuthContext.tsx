@@ -14,6 +14,8 @@ export type User = {
   avatar_url: string | null;
   bio: string | null;
   is_public: boolean;
+  /** Titre gagné en complétant une collection (ex. « Roi des pirates »). */
+  title?: string | null;
   created_at: string;
 };
 

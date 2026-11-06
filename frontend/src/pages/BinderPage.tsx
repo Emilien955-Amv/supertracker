@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 
+import { useAuth } from "../auth/AuthContext";
+import type { User } from "../auth/AuthContext";
 import { GameCard } from "../components/GameCard";
+import { MasterCard } from "../components/MasterCard";
 import { MissingCard } from "../components/MissingCard";
 import { Poster } from "../components/Poster";
 import { ProgressBar } from "../components/ProgressBar";
 import { ApiError, apiFetch } from "../lib/api";
 import { KIND_LABELS, contentPath } from "../lib/catalog";
 import { RARITIES, RARITY_COLORS, RARITY_LABELS } from "../lib/cards";
-import type { BinderPage as BinderPageData, CardRead, CollectionCard, Rarity } from "../lib/cards";
+import type { BinderPage as BinderPageData, CardRead, CollectionCard, Mastery, Rarity } from "../lib/cards";
+import { announceRewards } from "../lib/gamification";
 import { useApiResource } from "../lib/useApi";
 
 /** Une page du classeur : toutes les cartes d'une œuvre. */
@@ -19,6 +23,8 @@ export default function BinderPage() {
   const [rarity, setRarity] = useState<Rarity | null>(null);
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [titleMessage, setTitleMessage] = useState<string | null>(null);
+  const { updateUser } = useAuth();
 
   if (state.status === "idle" || state.status === "loading") {
     return <main className="mx-auto max-w-3xl px-5 pt-8 text-muted">Chargement…</main>;
@@ -48,12 +54,24 @@ export default function BinderPage() {
     if (!window.confirm(`Fabriquer « ${label} » pour ${card.craft_cost} fragments ?`)) return;
     setError(null);
     try {
-      await apiFetch<{ card: CardRead; fragments: number }>(`/api/cards/${card.id}/craft`, {
-        method: "POST",
-      });
+      const result = await apiFetch<{ card: CardRead; fragments: number; masteries: Mastery[] }>(
+        `/api/cards/${card.id}/craft`,
+        { method: "POST" },
+      );
+      for (const mastery of result.masteries) announceRewards(mastery.rewards);
       setPage(await apiFetch<BinderPageData>(path));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Échec de la fabrication.");
+    }
+  }
+
+  async function showTitle(contentId: number) {
+    setTitleMessage(null);
+    try {
+      updateUser(await apiFetch<User>("/api/users/me", { method: "PATCH", body: { title_content_id: contentId } }));
+      setTitleMessage("Titre affiché sur votre profil.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Échec.");
     }
   }
 
@@ -86,6 +104,30 @@ export default function BinderPage() {
           </Link>
         </div>
       </header>
+
+      {page.mastery ? (
+        <section aria-label="Collection complète" className="mt-5 flex items-center gap-4 rounded-2xl border border-gold/60 bg-gold/10 p-4">
+          <div className="w-24 shrink-0">
+            <MasterCard mastery={page.mastery} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-black text-gold">🏆 Collection complète !</p>
+            <p className="mt-1 text-sm">Titre débloqué : « {page.mastery.title} »</p>
+            <button
+              type="button"
+              onClick={() => void showTitle(page.mastery!.content_id)}
+              className="mt-2 rounded-lg bg-gold px-3 py-1.5 text-sm font-semibold text-[#3a2405]"
+            >
+              Afficher ce titre sur mon profil
+            </button>
+            {titleMessage && <p className="mt-1 text-xs text-ok" aria-live="polite">{titleMessage}</p>}
+          </div>
+        </section>
+      ) : (
+        <p className="mt-4 text-xs text-muted">
+          🏆 Complétez cette collection pour gagner la carte « Maître », un titre de profil, 500 XP et 5 boosters.
+        </p>
+      )}
 
       <ul className="mt-5 flex flex-wrap gap-2" aria-label="Filtrer par rareté">
         {RARITIES.map((r) => (

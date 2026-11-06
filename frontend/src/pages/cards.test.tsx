@@ -186,3 +186,42 @@ describe("Cartes", () => {
     }
   });
 });
+
+describe("Collection complète", () => {
+  it("célèbre la collection complétée par un booster avec la carte « Maître »", async () => {
+    mockFetch({
+      ...CONNECTE,
+      "GET /api/cards/me": { status: 200, body: COLLECTION },
+      "GET /api/cards/binder": { status: 200, body: CLASSEUR },
+      "POST /api/cards/boosters/open": {
+        status: 200,
+        body: {
+          theme: "movie",
+          boosters_opened: 1,
+          cards: [1, 2, 3, 4, 5].map((id) => ({ card: carte(id, "common", `Perso ${id}`), is_new: true, fragments: 0 })),
+          fragments: 0,
+          boosters_left: 0,
+          masteries: [
+            {
+              content_id: 7,
+              work_title: "Matrix",
+              poster_url: null,
+              title: "Maître de Matrix",
+              completed_at: null,
+              rewards: null,
+            },
+          ],
+        },
+      },
+    });
+    afficher();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Ouvrir un pack Films" }));
+    const fenetre = await screen.findByRole("dialog", { name: /Votre booster/ });
+    expect(within(fenetre).queryByText("🏆 Collection complète !")).toBeNull(); // pas avant d'avoir tout vu
+    fireEvent.click(within(fenetre).getByRole("button", { name: "Tout retourner" }));
+
+    expect(within(fenetre).getByText("🏆 Collection complète !")).toBeTruthy();
+    expect(within(fenetre).getByText("Titre débloqué : « Maître de Matrix »")).toBeTruthy();
+  });
+});

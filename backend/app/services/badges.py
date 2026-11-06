@@ -30,6 +30,7 @@ class Metric(StrEnum):
     MARATHONS = "marathons"
     JOUR_J = "jour_j"  # épisodes vus le jour de leur sortie
     LEVEL = "level"
+    MASTERIES = "masteries"  # œuvres dont on possède toutes les cartes
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,33 @@ BADGES: tuple[Badge, ...] = (
         1,
     ),
     Badge("niveau_10", "Vétéran", "Atteindre le niveau 10.", "⭐", Tier.GOLD, Metric.LEVEL, 10),
+    Badge(
+        "maitre_collection",
+        "Collection complète",
+        "Obtenir toutes les cartes d'une œuvre.",
+        "🏅",
+        Tier.BRONZE,
+        Metric.MASTERIES,
+        1,
+    ),
+    Badge(
+        "maitre_cinq",
+        "Grand collectionneur",
+        "Compléter 5 collections.",
+        "🎖️",
+        Tier.SILVER,
+        Metric.MASTERIES,
+        5,
+    ),
+    Badge(
+        "maitre_vingt",
+        "Conservateur de musée",
+        "Compléter 20 collections.",
+        "👑",
+        Tier.GOLD,
+        Metric.MASTERIES,
+        20,
+    ),
 )
 
 BADGES_BY_CODE = {badge.code: badge for badge in BADGES}

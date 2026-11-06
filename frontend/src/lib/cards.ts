@@ -1,6 +1,7 @@
 /** Types des cartes (miroir de app/schemas/cards.py) et apparence des raretés. */
 
 import type { ContentKind, Source } from "./catalog";
+import type { Rewards } from "./gamification";
 
 export type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary" | "mythic" | "divine";
 
@@ -99,10 +100,25 @@ export type Collection = {
 export type BinderContent = CardRead["content"] & { poster_url: string | null; year: number | null };
 
 /** Une pochette du classeur : une œuvre et sa progression. */
-export type BinderEntry = { content: BinderContent; owned: number; total: number };
+export type BinderEntry = { content: BinderContent; owned: number; total: number; mastered: boolean };
+
+/** Collection complète : carte « Maître » et titre de profil débloqué. */
+export type Mastery = {
+  content_id: number;
+  work_title: string;
+  poster_url: string | null;
+  title: string;
+  completed_at: string | null;
+  rewards: Rewards | null;
+};
 
 /** Toutes les cartes d'une œuvre. */
-export type BinderPage = { content: BinderContent; fragments: number; cards: CollectionCard[] };
+export type BinderPage = {
+  content: BinderContent;
+  fragments: number;
+  cards: CollectionCard[];
+  mastery: Mastery | null;
+};
 
 /** Liste des cartes qu'on peut obtenir dans un pack (une page). */
 export type PackContents = {
@@ -120,6 +136,8 @@ export type BoosterOpened = {
   cards: { card: CardRead; is_new: boolean; fragments: number }[];
   fragments: number;
   boosters_left: number;
+  /** Collections complétées grâce à ce booster. */
+  masteries?: Mastery[];
 };
 
 /** Les raretés à partir de « Rare » brillent à la révélation. */

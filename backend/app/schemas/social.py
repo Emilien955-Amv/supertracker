@@ -23,6 +23,12 @@ class RarityCount(BaseModel):
     count: int
 
 
+class MasteryBrief(BaseModel):
+    work_title: str
+    poster_url: str | None
+    title: str
+
+
 class ProfileStatsRead(BaseModel):
     level: int
     xp: int
@@ -32,6 +38,7 @@ class ProfileStatsRead(BaseModel):
     cards: int
     top_cards: list[RarityCount]  # Légendaires, Mythiques, Divines
     badges: list[BadgeBrief]
+    masteries: list[MasteryBrief] = []  # collections complètes (cartes « Maître »)
 
 
 class ProfileRead(BaseModel):
@@ -42,6 +49,7 @@ class ProfileRead(BaseModel):
     visible: bool
     is_public: bool
     bio: str | None = None
+    title: str | None = None
     member_since: datetime | None = None
     stats: ProfileStatsRead | None = None
 
@@ -57,3 +65,5 @@ class ProfileUpdate(BaseModel):
 
     bio: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] | None = None
     is_public: bool | None = None
+    # Titre affiché : l'œuvre complétée choisie ; null explicite = aucun titre.
+    title_content_id: int | None = None

@@ -29,6 +29,7 @@ from app.models import (
 )
 from app.services import gamification
 from app.services.badges import BADGES_BY_CODE, Badge
+from app.services.titles import title_for
 
 MAX_PENDING = 100  # demandes en attente envoyées par une même personne
 SEARCH_LIMIT = 20
@@ -56,6 +57,14 @@ def _pair(a: int, b: int) -> ColumnElement[bool]:
         and_(Friendship.requester_id == a, Friendship.addressee_id == b),
         and_(Friendship.requester_id == b, Friendship.addressee_id == a),
     )
+
+
+async def title_of(session: AsyncSession, user: User) -> str | None:
+    """Titre affiché sous le pseudo (celui de l'œuvre complétée choisie)."""
+    if user.title_content_id is None:
+        return None
+    content = await session.get(Content, user.title_content_id)
+    return title_for(content.title) if content else None
 
 
 async def find_user(session: AsyncSession, username: str) -> User:
