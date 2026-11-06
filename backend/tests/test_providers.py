@@ -493,6 +493,7 @@ async def test_tmdb_ignore_les_animes_japonais() -> None:
                 "id": 111110,
                 "media_type": "tv",
                 "name": "ONE PIECE",
+                "first_air_date": "2023-08-31",
                 "genre_ids": [10759],
                 "original_language": "en",
             },
