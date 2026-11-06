@@ -57,5 +57,6 @@ class UserRead(BaseModel):
     email: str
     username: str
     avatar_url: str | None
+    bio: str | None
     is_public: bool
     created_at: datetime

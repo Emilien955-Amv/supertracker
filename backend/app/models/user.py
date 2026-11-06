@@ -24,6 +24,8 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
 
     avatar_url: Mapped[str | None] = mapped_column(String(500))
+    # Petite présentation affichée sur le profil (facultative).
+    bio: Mapped[str | None] = mapped_column(String(300))
 
     # Profil privé par défaut (protection des données dès la conception, RGPD).
     is_public: Mapped[bool] = mapped_column(Boolean, server_default=false())

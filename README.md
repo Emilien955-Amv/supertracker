@@ -4,7 +4,7 @@ Application web et mobile (PWA) de suivi de séries, animes, films, livres et
 jeux vidéo, avec bibliothèques personnalisées, gamification et cartes à
 collectionner.
 
-> **État actuel : étape 2b + bibliothèque visuelle.** Comptes utilisateurs sécurisés, recherche unifiée de films,
+> **État actuel : étape 3a (profils et amis).** Comptes utilisateurs sécurisés, recherche unifiée de films,
 > séries et animes (TMDB, AniList) avec fiche détaillée, « où regarder » (logos cliquables) et cache Redis ;
 > suivi (statut, note, avis), épisodes cochés un par un avec progression, et
 > bibliothèques personnelles : un vrai meuble à étagères (rangement par glisser-déposer,

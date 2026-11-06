@@ -1,4 +1,9 @@
+import { useState } from "react";
+import { Link } from "react-router";
+
 import { useAuth } from "../auth/AuthContext";
+import type { User } from "../auth/AuthContext";
+import { apiFetch } from "../lib/api";
 import { ProgressBar } from "../components/ProgressBar";
 import { TIER_LABELS, TIER_STYLES, levelPercent } from "../lib/gamification";
 import type { BadgeRead, Profile } from "../lib/gamification";
@@ -33,6 +38,8 @@ export default function ProfilePage() {
         </h1>
         <p className="text-muted">Vos points, votre régularité et vos succès.</p>
       </header>
+
+      {auth.status === "authenticated" && <SocialSettings />}
 
       <section aria-labelledby="niveau" className="rounded-2xl border border-accent/40 bg-accent/10 p-5">
         <div className="flex items-end justify-between">
@@ -133,5 +140,79 @@ function BadgeCard({ badge }: { badge: BadgeRead }) {
         </div>
       )}
     </div>
+  );
+}
+
+
+/** Présentation, visibilité du profil et accès aux amis. */
+function SocialSettings() {
+  const { state, updateUser } = useAuth();
+  const user = state.status === "authenticated" ? state.user : null;
+  const [bio, setBio] = useState(user?.bio ?? "");
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  if (!user) return null;
+
+  async function save(changes: { bio?: string; is_public?: boolean }, confirmation: string) {
+    setMessage(null);
+    try {
+      updateUser(await apiFetch<User>("/api/users/me", { method: "PATCH", body: changes }));
+      setMessage({ ok: true, text: confirmation });
+    } catch (err) {
+      setMessage({ ok: false, text: err instanceof Error ? err.message : "Échec." });
+    }
+  }
+
+  return (
+    <section aria-labelledby="social" className="rounded-xl border border-border bg-surface p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 id="social" className="font-semibold">
+          Mon profil social
+        </h2>
+        <Link to="/amis" className="rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-white">
+          👥 Mes amis
+        </Link>
+      </div>
+      <label className="mt-3 block text-sm">
+        <span className="text-muted">Ma présentation</span>
+        <textarea
+          value={bio}
+          onChange={(e) => setBio(e.target.value)}
+          onBlur={() => bio !== (user.bio ?? "") && void save({ bio }, "Présentation enregistrée.")}
+          maxLength={300}
+          rows={2}
+          placeholder="Ex. Fan d'animes et de séries policières…"
+          className="mt-1 block w-full rounded-lg border border-border bg-bg px-3 py-2"
+        />
+      </label>
+      <label className="mt-3 flex items-start gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={user.is_public}
+          onChange={(e) =>
+            void save(
+              { is_public: e.target.checked },
+              e.target.checked ? "Votre profil est maintenant public." : "Votre profil est maintenant privé.",
+            )
+          }
+          className="mt-0.5 h-5 w-5 accent-accent"
+        />
+        <span>
+          Profil public
+          <span className="block text-xs text-muted">
+            {user.is_public
+              ? "Tout le monde peut voir votre niveau, vos succès et votre collection."
+              : "Seuls vos amis voient votre niveau, vos succès et votre collection."}
+          </span>
+        </span>
+      </label>
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <Link to={`/u/${encodeURIComponent(user.username)}`} className="text-sm text-accent hover:underline">
+          Voir mon profil comme les autres →
+        </Link>
+        <p aria-live="polite" className={`text-sm ${message?.ok ? "text-ok" : "text-error"}`}>
+          {message?.text}
+        </p>
+      </div>
+    </section>
   );
 }

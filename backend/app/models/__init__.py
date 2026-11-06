@@ -16,6 +16,7 @@ from app.models.card import (
     UserCard,
 )
 from app.models.content import Content, Episode
+from app.models.friendship import Friendship, FriendStatus
 from app.models.gamification import UserBadge, XpEvent
 from app.models.library import (
     ItemSize,
@@ -41,6 +42,8 @@ __all__ = [
     "ContentPlatform",
     "Episode",
     "EpisodeView",
+    "FriendStatus",
+    "Friendship",
     "ItemSize",
     "Library",
     "LibraryItem",

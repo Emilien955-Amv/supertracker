@@ -12,6 +12,7 @@ export type User = {
   email: string;
   username: string;
   avatar_url: string | null;
+  bio: string | null;
   is_public: boolean;
   created_at: string;
 };
@@ -27,6 +28,8 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Remplace l'utilisateur affiché (ex. après une modification du profil). */
+  updateUser: (user: User) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -82,9 +85,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const updateUser = useCallback((user: User) => setState({ status: "authenticated", user }), []);
+
   const value = useMemo(
-    () => ({ state, login, register, logout }),
-    [state, login, register, logout],
+    () => ({ state, login, register, logout, updateUser }),
+    [state, login, register, logout, updateUser],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
