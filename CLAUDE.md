@@ -40,9 +40,12 @@ Les tests backend utilisent la base dédiée `supertracker_test` (créée une fo
   rien pour un contenu pas sorti, décocher reprend les XP. 14 succès.
 - **Niveaux** : XP nécessaire = 100 × (niveau − 1)^1,5.
 - **Cartes** : uniquement des personnages (jamais d'acteurs ni de doubleurs).
-  Raretés par rang d'importance : n° 1 Divine (une par œuvre, non fabricable),
-  n° 2 Mythique, n° 3-4 Légendaires, puis Épique (rôles principaux), Rare
-  (seconds rôles), Peu commune (récurrents), Commune (petits rôles).
+  Raretés par rang d'importance : n° 1 (personnage principal) Divine (une par
+  œuvre, non fabricable), puis 2 à 5 Mythiques et autant de Légendaires selon la
+  taille de l'œuvre (<30, <80, <150, sinon 5), puis Épique (rôles principaux),
+  Rare (seconds rôles), Peu commune (récurrents), Commune (petits rôles).
+  Animes : importance = popularité des fans (favoris AniList), héros en tête.
+  Films/séries : image du personnage via les wikis Fandom (sinon photo de l'acteur).
   Probabilités : 50 / 25 / 13 / 7 / 3,5 / 1 / 0,5 %. Rare garantie par booster,
   Épique+ garantie au 20e booster sans.
 - **Boosters** : bienvenue, 1 toutes les 5 min (12 en réserve max), 1 par niveau,

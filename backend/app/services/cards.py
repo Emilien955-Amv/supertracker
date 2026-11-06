@@ -1,14 +1,15 @@
 """Cartes à collectionner : des PERSONNAGES, en boosters par thème.
 
-Raretés (probabilité par carte tirée) selon l'importance du personnage,
-avec un personnage DIFFÉRENT à chaque rareté haute :
-    Divine        0,5 %  le héros (n° 1) — une seule par œuvre, non fabricable
-    Mythique      1 %    le n° 2 de l'histoire
-    Légendaire    3,5 %  les n° 3 et 4
+Raretés (probabilité par carte tirée) selon l'importance du personnage :
+    Divine        0,5 %  le personnage principal — une seule par œuvre, non fabricable
+    Mythique      1 %    les 2 à 5 suivants (selon la taille de l'œuvre)
+    Légendaire    3,5 %  les 2 à 5 suivants
     Épique        7 %    les autres rôles principaux
     Rare         13 %    seconds rôles
     Peu commune  25 %    personnages récurrents
     Commune      50 %    petits rôles
+Pour les animes, l'importance suit la popularité auprès des fans (favoris
+AniList) : Gol D. Roger ou Shanks sont Mythiques ou Légendaires.
 
 Règles :
 - cartes de personnages uniquement (nom du personnage, jamais l'acteur) ;
@@ -44,6 +45,7 @@ from sqlalchemy import Select, and_, case, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models import (
     Booster,
     BoosterCard,
@@ -58,12 +60,14 @@ from app.models import (
     TrackingStatus,
     UserCard,
 )
+from app.providers import fandom
 from app.providers.base import (
     CharacterRole,
     CharacterSummary,
     ContentKind,
     MetadataProvider,
     ProviderError,
+    Source,
 )
 from app.services import catalog, gamification
 from app.services.titles import title_for
@@ -111,7 +115,10 @@ CRAFT_COST = {
 # Les 4 personnages les plus importants ont chacun leur rareté haute
 # (n° 1 Divine, n° 2 Mythique, n° 3 et 4 Légendaires) ; ensuite, la rareté
 # dépend du rôle.
-TOP_RARITIES = [Rarity.DIVINE, Rarity.MYTHIC, Rarity.LEGENDARY, Rarity.LEGENDARY]
+# Nombre de Mythiques et de Légendaires selon la taille de l'œuvre
+# (nombre de personnages illustrés) : 2 pour une petite œuvre, 5 pour One Piece.
+TIER_SIZES = ((30, 2), (80, 3), (150, 4))
+TIER_MAX = 5
 ROLE_RARITY = {
     CharacterRole.HERO: Rarity.DIVINE,
     CharacterRole.MAIN: Rarity.EPIC,
@@ -227,10 +234,27 @@ def _now() -> datetime:
 # --- Création des cartes d'un contenu -----------------------------------------
 
 
-def rarity_for(rank: int, role: CharacterRole) -> Rarity:
-    """Rareté d'un personnage selon son rang d'importance (0 = le héros)."""
-    if rank < len(TOP_RARITIES):
-        return TOP_RARITIES[rank]
+def tier_size(total: int) -> int:
+    """Combien de Mythiques (et autant de Légendaires) pour une œuvre de « total » personnages."""
+    for limit, size in TIER_SIZES:
+        if total < limit:
+            return size
+    return TIER_MAX
+
+
+def rarity_for(rank: int, role: CharacterRole, total: int) -> Rarity:
+    """Rareté d'un personnage selon son rang d'importance (0 = le héros).
+
+    n° 1 : Divine ; puis 2 à 5 Mythiques et autant de Légendaires selon la
+    taille de l'œuvre ; ensuite, la rareté dépend du rôle.
+    """
+    size = tier_size(total)
+    if rank == 0:
+        return Rarity.DIVINE
+    if rank <= size:
+        return Rarity.MYTHIC
+    if rank <= 2 * size:
+        return Rarity.LEGENDARY
     return ROLE_RARITY[role]
 
 
@@ -245,12 +269,22 @@ async def ensure_cards(
     if provider is None:
         return
     kind = ContentKind(content.kind)
+    titles = [t for t in (content.original_title, content.title) if t]
+
+    async def fetch() -> list[CharacterSummary]:
+        found = await provider.get_characters(http, kind, content.external_id)
+        if content.source == Source.TMDB and get_settings().environment != "test":
+            # Films et séries : l'image du personnage (wiki de fans) plutôt
+            # que le portrait officiel de l'acteur.
+            found = await fandom.enrich(http, titles, found)
+        return found
+
     try:
         characters = await catalog.cached(
             f"characters:{content.source}:{content.kind}:{content.external_id}",
             CHARACTERS_CACHE_SECONDS,
             _characters_adapter,
-            lambda: provider.get_characters(http, kind, content.external_id),
+            fetch,
         )
     except ProviderError:
         # Source momentanément en panne : on réessaiera plus tard.
@@ -283,7 +317,12 @@ async def ensure_cards(
         # carte déjà obtenue reste le même personnage.
         digest = hashlib.sha1(character.name.lower().encode(), usedforsecurity=False)
         key = f"char:{digest.hexdigest()[:16]}"
-        add(key, rarity_for(len(rows), character.role), character, ROLE_LABELS[character.role])
+        add(
+            key,
+            rarity_for(len(rows), character.role, len(characters)),
+            character,
+            ROLE_LABELS[character.role],
+        )
 
     if rows:
         statement = insert(Card).values(rows)

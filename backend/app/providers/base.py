@@ -69,6 +69,8 @@ class CharacterSummary(BaseModel):
     image_url: str
     role: CharacterRole
     order: int = Field(description="Rang d'importance (0 = le plus important)")
+    # Popularité auprès des fans (favoris AniList) ; 0 si inconnue.
+    popularity: int = 0
 
 
 class WatchProvider(BaseModel):

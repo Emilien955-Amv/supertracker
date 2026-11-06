@@ -64,7 +64,7 @@ query ($id: Int, $page: Int) {
       pageInfo { hasNextPage }
       edges {
         role
-        node { name { full } image { large } }
+        node { name { full } image { large } favourites }
       }
     }
   }
@@ -429,11 +429,19 @@ class AniListProvider:
                     image_url=image,
                     role=role,
                     order=len(characters),
+                    popularity=int(node.get("favourites") or 0),
                 )
             )
             if len(characters) >= MAX_CHARACTERS:
                 break
-        return characters
+        # Ordre d'importance : le héros d'abord, puis les personnages préférés des
+        # fans (Gol D. Roger, Shanks, Ace…). Le rôle AniList reste celui d'origine.
+        hero = [c for c in characters if c.role == CharacterRole.HERO]
+        others = sorted(
+            (c for c in characters if c.role != CharacterRole.HERO),
+            key=lambda c: -c.popularity,
+        )
+        return [c.model_copy(update={"order": i}) for i, c in enumerate(hero + others)]
 
     async def get_popular(self, http: httpx.AsyncClient, kind: ContentKind) -> list[ContentDetail]:
         if kind != ContentKind.ANIME:

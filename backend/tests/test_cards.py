@@ -331,9 +331,9 @@ async def test_liste_des_cartes_d_un_pack(db_client: AsyncClient, contexte: Cont
     assert [(c["rarity"], c["title"]) for c in pack["cards"]] == [
         ("divine", "Neo (680)"),
         ("mythic", "Morpheus (680)"),
-        ("legendary", "Oracle (680)"),
+        ("mythic", "Oracle (680)"),
+        ("legendary", "Figurant (680)"),  # même rareté : ordre alphabétique
         ("legendary", "Tank (680)"),
-        ("common", "Figurant (680)"),
     ]
     assert not any(c["owned"] for c in pack["cards"])
     # Une seule Divine par œuvre : celle de son héros.
@@ -341,7 +341,7 @@ async def test_liste_des_cartes_d_un_pack(db_client: AsyncClient, contexte: Cont
 
     params = {"rarity": "mythic"}
     mythiques = (await db_client.get("/api/cards/packs/netflix", params=params)).json()
-    assert [c["title"] for c in mythiques["cards"]] == ["Morpheus (680)"]
+    assert [c["title"] for c in mythiques["cards"]] == ["Morpheus (680)", "Oracle (680)"]
     trouve = (await db_client.get("/api/cards/packs/netflix", params={"q": "tank"})).json()
     assert [c["title"] for c in trouve["cards"]] == ["Tank (680)"]
     # Les caractères spéciaux ne cassent pas la recherche.
@@ -397,16 +397,20 @@ def test_un_personnage_different_par_rarete_haute() -> None:
     from app.providers.base import CharacterRole as Role
     from app.services.cards import rarity_for
 
-    assert [rarity_for(rang, Role.MAIN) for rang in range(6)] == [
+    # Petite œuvre (10 personnages) : 1 Divine, 2 Mythiques, 2 Légendaires.
+    assert [rarity_for(rang, Role.MAIN, 10) for rang in range(6)] == [
         Rarity.DIVINE,
+        Rarity.MYTHIC,
         Rarity.MYTHIC,
         Rarity.LEGENDARY,
         Rarity.LEGENDARY,
         Rarity.EPIC,
-        Rarity.EPIC,
     ]
-    assert rarity_for(10, Role.SUPPORTING) == Rarity.RARE
-    assert rarity_for(30, Role.BACKGROUND) == Rarity.COMMON
+    # Très grande œuvre (300 personnages, One Piece) : 5 Mythiques et 5 Légendaires.
+    grande = [rarity_for(rang, Role.SUPPORTING, 300) for rang in range(12)]
+    assert (grande.count(Rarity.MYTHIC), grande.count(Rarity.LEGENDARY)) == (5, 5)
+    assert grande[11] == Rarity.RARE
+    assert rarity_for(30, Role.BACKGROUND, 300) == Rarity.COMMON
 
 
 def test_titres_de_profil() -> None:

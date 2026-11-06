@@ -65,6 +65,8 @@ ANIMATION_GENRE = 16  # identifiant du genre « Animation » chez TMDB
 VOICE_ROLE = re.compile(r"\((?:voice|voix)\)", re.IGNORECASE)
 # Mentions de générique entre parenthèses : « (uncredited) », « (performer) »…
 UNCREDITED = re.compile(r"\s*\([^)]*\)\s*$")
+# Surnom entre guillemets : « Tyrion 'The Halfman' Lannister » → « Tyrion Lannister ».
+NICKNAME = re.compile(r"\s+['\"“«][^'\"”»]+['\"”»](?=\s)")
 
 # Le plus de personnages possible (au-delà de 100, ce sont des figurants).
 MAX_CHARACTERS = 100
@@ -292,7 +294,7 @@ class TmdbProvider:
             # doubleur, pas du personnage. On l'ignore.
             if VOICE_ROLE.search(name):
                 continue
-            name = UNCREDITED.sub("", name).strip()
+            name = NICKNAME.sub(" ", UNCREDITED.sub("", name)).strip()
             photo = item.get("profile_path")
             # Données manquantes (pas de nom de personnage ou pas de photo) :
             # pas de carte, plutôt qu'une carte vide.

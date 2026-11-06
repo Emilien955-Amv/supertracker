@@ -557,3 +557,37 @@ async def test_tmdb_personnages_d_une_saga() -> None:
     # Présents dans les 2 films d'abord ; « Mangemort » (plusieurs acteurs) écarté.
     assert [p.name for p in persos] == ["Harry Potter", "Ron Weasley", "Gilderoy Lockhart"]
     assert persos[0].role == CharacterRole.HERO
+
+
+async def test_anilist_les_preferes_des_fans_passent_devant() -> None:
+    def edge(nom: str, role: str, favoris: int) -> dict[str, object]:
+        return {
+            "role": role,
+            "node": {
+                "name": {"full": nom},
+                "image": {"large": "https://img/x.png"},
+                "favourites": favoris,
+            },
+        }
+
+    reponse = {
+        "data": {
+            "Media": {
+                "characters": {
+                    "pageInfo": {"hasNextPage": False},
+                    "edges": [
+                        edge("Luffy", "MAIN", 90000),
+                        edge("Usopp", "MAIN", 8000),
+                        edge("Gol D. Roger", "SUPPORTING", 30000),
+                    ],
+                }
+            }
+        }
+    }
+    async with faux_client(lambda _: httpx.Response(200, json=reponse)) as http:
+        persos = await AniListProvider().get_characters(http, ContentKind.ANIME, "21")
+
+    # Le héros reste en tête ; Roger, très apprécié, passe devant Usopp.
+    assert [p.name for p in persos] == ["Luffy", "Gol D. Roger", "Usopp"]
+    assert [p.order for p in persos] == [0, 1, 2]
+    assert persos[1].role == CharacterRole.SUPPORTING  # son rôle d'origine est gardé
