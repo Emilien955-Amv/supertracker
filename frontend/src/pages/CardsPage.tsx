@@ -161,6 +161,19 @@ export default function CardsPage() {
         </ul>
       </section>
 
+      <Link
+        to="/cartes/demandes"
+        className="mt-6 flex items-center justify-between rounded-xl border border-border bg-surface p-4 hover:border-accent/60"
+      >
+        <span>
+          <span className="block font-semibold">🗳️ Demandes de cartes</span>
+          <span className="text-sm text-muted">Votez pour les séries, films et animes à ajouter</span>
+        </span>
+        <span aria-hidden="true" className="text-accent">
+          →
+        </span>
+      </Link>
+
       <Binder key={binderKey} />
 
       {opened && (

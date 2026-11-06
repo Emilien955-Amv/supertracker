@@ -13,6 +13,7 @@ import LibraryPage from "./pages/LibraryPage";
 import LoginPage from "./pages/LoginPage";
 import FriendsPage from "./pages/FriendsPage";
 import ProfilePage from "./pages/ProfilePage";
+import RequestsPage from "./pages/RequestsPage";
 import UserProfilePage from "./pages/UserProfilePage";
 import RegisterPage from "./pages/RegisterPage";
 import SearchPage from "./pages/SearchPage";
@@ -44,6 +45,7 @@ export function AppRoutes() {
         <Route path="/cartes" element={<CardsPage />} />
         <Route path="/cartes/pack/:theme" element={<PackPage />} />
         <Route path="/cartes/oeuvre/:id" element={<BinderPage />} />
+        <Route path="/cartes/demandes" element={<RequestsPage />} />
       </Route>
 
       <Route

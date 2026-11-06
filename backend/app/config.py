@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     # Durées de mise en cache des réponses des API tierces, en secondes.
     search_cache_seconds: int = 3600  # 1 h : les résultats bougent peu
     detail_cache_seconds: int = 86400  # 24 h : une fiche change rarement
+    # Votes nécessaires pour qu'une œuvre demandée entre au catalogue de cartes.
+    card_request_votes: int = 3
 
     # Base dédiée aux tests (en local) : les tests ne touchent jamais aux
     # données de développement, ni à la tâche qui remplit le catalogue de cartes.

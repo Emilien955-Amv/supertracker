@@ -29,6 +29,7 @@ from app.models.library import (
 )
 from app.models.mastery import Mastery
 from app.models.refresh_token import RefreshToken
+from app.models.request import RequestStatus, WorkRequest, WorkRequestVote
 from app.models.tracking import EpisodeView, Tracking, TrackingStatus
 from app.models.user import User
 
@@ -52,6 +53,7 @@ __all__ = [
     "Mastery",
     "Rarity",
     "RefreshToken",
+    "RequestStatus",
     "SortMode",
     "Tracking",
     "TrackingStatus",
@@ -60,5 +62,7 @@ __all__ = [
     "UserCard",
     "ViewMode",
     "Wood",
+    "WorkRequest",
+    "WorkRequestVote",
     "XpEvent",
 ]

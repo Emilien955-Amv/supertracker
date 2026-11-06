@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.cache import redis_client
 from app.db import SessionLocal
 from app.http_client import get_http_client
-from app.models import Card, Content, ContentPlatform
+from app.models import Card, Content, ContentPlatform, RequestStatus, WorkRequest
 from app.providers.base import (
     ContentDetail,
     ContentKind,
@@ -245,6 +245,19 @@ async def seed_catalog(
                     if site in ANILIST_SITES:
                         anime_sites[ANILIST_SITES[site]].add(content.id)
 
+    # 4. Les œuvres ajoutées grâce aux sondages restent au catalogue.
+    requested = await session.scalars(
+        select(Content.id)
+        .join(
+            WorkRequest,
+            (WorkRequest.source == Content.source)
+            & (WorkRequest.kind == Content.kind)
+            & (WorkRequest.external_id == Content.external_id),
+        )
+        .where(WorkRequest.status == RequestStatus.ADDED)
+    )
+    selected += [content_id for content_id in requested if content_id not in selected]
+
     # Le catalogue : exactement les œuvres retenues, dans l'ordre du classement.
     # (Les cartes déjà obtenues d'une œuvre sortie du catalogue restent à leur
     # propriétaire ; elles ne sortent simplement plus dans les boosters.)
@@ -275,7 +288,7 @@ async def seed_catalog(
         )
         return found if found in catalog_ids else None
 
-    # 4. Packs par plateforme : les œuvres du catalogue disponibles sur chacune.
+    # 5. Packs par plateforme : les œuvres du catalogue disponibles sur chacune.
     platforms: dict[PackTheme, set[int]] = {}
     if tmdb is not None:
         for platform, provider_id in PLATFORM_IDS.items():

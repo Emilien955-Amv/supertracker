@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { Attribution } from "../components/Attribution";
+import { CardRequest } from "../components/CardRequest";
 import { LibraryPicker } from "../components/LibraryPicker";
 import { Poster } from "../components/Poster";
 import { SeasonsTracker } from "../components/SeasonsTracker";
@@ -145,6 +146,8 @@ export default function ContentPage() {
             />
           </>
         )}
+
+        <CardRequest content={ref} />
 
         {content.genres.length > 0 && (
           <ul aria-label="Genres" className="mt-5 flex flex-wrap gap-2">

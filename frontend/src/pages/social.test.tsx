@@ -90,3 +90,33 @@ describe("Amis", () => {
     expect(screen.getByRole("button", { name: "Ajouter en ami : nami" })).toBeTruthy();
   });
 });
+
+describe("Demandes de cartes", () => {
+  it("liste les demandes et permet de voter", async () => {
+    const demande = {
+      id: 4,
+      source: "anilist",
+      kind: "anime",
+      external_id: "154587",
+      title: "Frieren",
+      poster_url: null,
+      year: 2023,
+      status: "open",
+      votes: 1,
+      votes_needed: 3,
+      voted: false,
+    };
+    const fetchMock = mockFetch({
+      ...CONNECTE,
+      "GET /api/requests": { status: 200, body: [demande] },
+      "POST /api/requests": { status: 200, body: { ...demande, votes: 2, voted: true } },
+    });
+    afficher("/cartes/demandes");
+
+    expect(await screen.findByText(/1 \/ 3 votes/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Voter : Frieren" }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/requests" && init?.method === "POST")).toBe(true),
+    );
+  });
+});
